@@ -1,0 +1,11 @@
+pandas>=2.0
+numpy
+scikit-learn
+xgboost
+lightgbm
+catboost
+optuna
+kaggle
+pyyaml
+streamlit
+pyarrow

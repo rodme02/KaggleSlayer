@@ -1,0 +1,7 @@
+venv/
+
+.kaggle/
+
+competition_data/
+
+downloaded_datasets/
