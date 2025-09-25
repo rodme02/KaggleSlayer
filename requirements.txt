@@ -9,3 +9,5 @@ kaggle
 pyyaml
 streamlit
 pyarrow
+plotly
+joblib
