@@ -5,3 +5,5 @@ venv/
 competition_data/
 
 downloaded_datasets/
+
+.env

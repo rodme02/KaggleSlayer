@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(C:UsersrodriAppDataLocalProgramsPythonPython312python.exe -m pip install openai tenacity python-dotenv)",
+      "Bash(pip3 install:*)",
+      "Bash(py -3.11 test_llm_setup.py)",
+      "Bash(py:*)"
     ],
     "deny": [],
     "ask": []

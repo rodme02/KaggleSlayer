@@ -1,0 +1,17 @@
+{
+  "6d8d5abf03434df69d3c5bab8a39c179": {
+    "content": "Connection successful\n",
+    "tokens_used": 13,
+    "model": "google/gemini-flash-1.5-8b"
+  },
+  "dba45c693d144d60e62e98ea25883c7f": {
+    "content": "Connection successful",
+    "tokens_used": 24,
+    "model": "meta-llama/llama-3.2-3b-instruct"
+  },
+  "320f627081283b1fe8c33ec7f8574b31": {
+    "content": "Connection successful",
+    "tokens_used": 24,
+    "model": "meta-llama/llama-3.2-3b-instruct"
+  }
+}

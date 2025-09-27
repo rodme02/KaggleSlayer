@@ -138,11 +138,27 @@ class BaselineModel:
 
             if len(diff_cols) == 1:
                 target_col = list(diff_cols)[0]
-                unique_ratio = self.train_df[target_col].nunique() / len(self.train_df)
-                if unique_ratio < 0.1:
-                    return target_col, "classification"
+                target_series = self.train_df[target_col]
+
+                # Check data type first
+                if target_series.dtype in ['int64', 'float64']:
+                    # For numerical data, check if it's continuous or discrete
+                    unique_count = target_series.nunique()
+                    total_count = len(target_series)
+                    unique_ratio = unique_count / total_count
+
+                    # If more than 50 unique values OR unique ratio > 0.05, likely regression
+                    if unique_count > 50 or unique_ratio > 0.05:
+                        return target_col, "regression"
+                    else:
+                        # Check if values are integers (could be ordinal classification)
+                        if target_series.dtype == 'int64' and all(target_series == target_series.astype(int)):
+                            return target_col, "classification"
+                        else:
+                            return target_col, "regression"
                 else:
-                    return target_col, "regression"
+                    # Non-numerical data is classification
+                    return target_col, "classification"
 
         raise ValueError("Could not automatically detect target column")
 
@@ -151,8 +167,18 @@ class BaselineModel:
         print("\nPreprocessing features...")
         preprocessing_steps = []
 
-        # Separate features from target
+        # Separate features from target and remove ID-like columns
         feature_cols = [col for col in self.train_df.columns if col != target_col]
+
+        # Remove ID-like columns (common patterns)
+        id_patterns = ['id', 'index', 'key', 'passengerid', 'customerid']
+        feature_cols = [col for col in feature_cols
+                       if not any(pattern in col.lower() for pattern in id_patterns)]
+
+        if len(feature_cols) < len(self.train_df.columns) - 1:
+            removed_cols = set(self.train_df.columns) - set(feature_cols) - {target_col}
+            preprocessing_steps.append(f"Removed ID columns: {list(removed_cols)}")
+
         X_train = self.train_df[feature_cols].copy()
         y_train = self.train_df[target_col].copy()
 
@@ -183,19 +209,32 @@ class BaselineModel:
                     if len(mode_val) > 0:
                         fill_val = mode_val[0]
                         X_train[col] = X_train[col].fillna(fill_val)
+                        X_train[col] = X_train[col].infer_objects(copy=False)
                         if X_test is not None:
                             X_test[col] = X_test[col].fillna(fill_val)
+                            X_test[col] = X_test[col].infer_objects(copy=False)
                         preprocessing_steps.append(f"Filled missing {col} with mode ({fill_val})")
                     else:
                         # Fallback to 'Unknown' for categorical
                         X_train[col] = X_train[col].fillna('Unknown')
+                        X_train[col] = X_train[col].infer_objects(copy=False)
                         if X_test is not None:
                             X_test[col] = X_test[col].fillna('Unknown')
+                            X_test[col] = X_test[col].infer_objects(copy=False)
                         preprocessing_steps.append(f"Filled missing {col} with 'Unknown'")
 
         # Encode categorical features
         categorical_cols = X_train.select_dtypes(include=['object', 'category']).columns
         for col in categorical_cols:
+            # Skip categorical columns with too many unique values (likely text/IDs)
+            n_unique = X_train[col].nunique()
+            if n_unique > 50:
+                X_train = X_train.drop(columns=[col])
+                if X_test is not None:
+                    X_test = X_test.drop(columns=[col])
+                preprocessing_steps.append(f"Dropped high-cardinality column {col} ({n_unique} unique values)")
+                continue
+
             encoder = LabelEncoder()
 
             # Fit on combined train+test data if test exists
@@ -232,19 +271,36 @@ class BaselineModel:
         if problem_type == "classification":
             # Check if binary or multiclass
             n_classes = y_train.nunique()
-            if n_classes == 2:
+            n_features = len(X_train.columns)
+
+            # Use different models based on data dimensionality
+            if n_features > 500:  # High-dimensional data (like images)
+                from sklearn.linear_model import SGDClassifier
+                print(f"High-dimensional data detected ({n_features} features), using SGDClassifier")
+                self.model = SGDClassifier(
+                    loss='log_loss',  # Equivalent to LogisticRegression
+                    random_state=self.random_state,
+                    max_iter=1000,
+                    alpha=0.01  # Regularization
+                )
+            elif n_classes == 2:
                 self.model = LogisticRegression(
                     random_state=self.random_state,
                     max_iter=1000
                 )
             else:
-                self.model = LogisticRegression(
-                    random_state=self.random_state,
-                    max_iter=1000,
-                    multi_class='ovr'
+                # For multiclass, use OneVsRestClassifier to avoid deprecation warnings
+                from sklearn.multiclass import OneVsRestClassifier
+                self.model = OneVsRestClassifier(
+                    LogisticRegression(
+                        random_state=self.random_state,
+                        max_iter=1000
+                    )
                 )
         else:  # regression
-            self.model = LinearRegression()
+            # Use Ridge regression for better generalization
+            from sklearn.linear_model import Ridge
+            self.model = Ridge(alpha=1.0, random_state=self.random_state)
 
         # Train the model
         self.model.fit(X_train, y_train)
@@ -266,13 +322,19 @@ class BaselineModel:
             # Use regular CV for regression
             cv = KFold(n_splits=self.cv_folds, shuffle=True,
                       random_state=self.random_state)
-            scoring = 'r2'
+            # Use negative RMSE for regression (more interpretable than R²)
+            scoring = 'neg_root_mean_squared_error'
 
         # Perform cross-validation
         cv_scores = cross_val_score(self.model, X_train, y_train,
                                   cv=cv, scoring=scoring)
 
-        print(f"CV {scoring}: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+        if problem_type == "regression":
+            # Convert negative RMSE back to positive
+            cv_scores = -cv_scores
+            print(f"CV RMSE: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+        else:
+            print(f"CV {scoring}: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
 
         # Get feature importance if available
         feature_importance = None

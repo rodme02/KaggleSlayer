@@ -20,6 +20,14 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
+# LLM integration
+try:
+    from agents.llm_coordinator import LLMCoordinator
+    from utils.llm_utils import PromptTemplates, LLMUtils
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
+
 
 @dataclass
 class DatasetInfo:
@@ -51,12 +59,31 @@ class DataQualityReport:
     recommendations: List[str]
 
 
+@dataclass
+class LLMDataInsights:
+    """Structure to hold LLM-generated data insights"""
+    competition_name: str
+    data_quality_score: int
+    critical_issues: List[str]
+    preprocessing_priorities: List[str]
+    feature_engineering_ideas: List[str]
+    potential_challenges: List[str]
+    target_insights: str
+    feature_interactions: List[str]
+    missing_data_strategy: str
+    outlier_strategy: str
+    validation_strategy: str
+    confidence_score: float
+    analysis_timestamp: str
+
+
 class DataScout:
     """
     Data Scout Agent for initial EDA and data cleaning of Kaggle competition datasets
     """
 
-    def __init__(self, competition_path: Path, output_dir: Optional[Path] = None):
+    def __init__(self, competition_path: Path, output_dir: Optional[Path] = None,
+                 enable_llm: bool = True):
         self.competition_path = Path(competition_path)
         self.competition_name = self.competition_path.name
         self.output_dir = output_dir or self.competition_path / "scout_output"
@@ -67,10 +94,23 @@ class DataScout:
         self.test_df = None
         self.dataset_info = None
         self.quality_report = None
+        self.llm_insights = None
 
         # Configuration
         self.outlier_threshold = 3.0  # Standard deviations for outlier detection
         self.missing_threshold = 0.8  # Drop columns with >80% missing values
+
+        # LLM integration
+        self.enable_llm = enable_llm and LLM_AVAILABLE
+        self.llm_coordinator = None
+
+        if self.enable_llm:
+            try:
+                self.llm_coordinator = LLMCoordinator(log_dir=self.competition_path / "llm_logs")
+                print("LLM-enhanced Data Scout initialized")
+            except Exception as e:
+                print(f"Warning: Could not initialize LLM coordinator: {e}")
+                self.enable_llm = False
 
     def load_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         """Load train and test datasets from competition directory"""
@@ -355,6 +395,143 @@ class DataScout:
 
         return recommendations
 
+    def analyze_with_llm(self) -> Optional[LLMDataInsights]:
+        """Use LLM to analyze dataset and generate advanced insights"""
+        if not self.enable_llm or not self.llm_coordinator:
+            return None
+
+        if not self.dataset_info:
+            print("Warning: No dataset info available for LLM analysis")
+            return None
+
+        print("\nGenerating LLM insights...")
+
+        try:
+            # Load competition context if available
+            competition_context = "No competition context available"
+            competition_insights_path = self.competition_path / "competition_understanding.json"
+
+            if competition_insights_path.exists():
+                try:
+                    with open(competition_insights_path, 'r') as f:
+                        comp_data = json.load(f)
+                    competition_context = LLMUtils.format_competition_context(comp_data)
+                except Exception:
+                    pass
+
+            # Create EDA summary for LLM
+            eda_summary = LLMUtils.format_dataset_summary(asdict(self.dataset_info))
+
+            # Get insights from LLM
+            prompt = PromptTemplates.dataset_insights(
+                eda_summary=eda_summary,
+                competition_context=competition_context
+            )
+
+            llm_response = self.llm_coordinator.structured_output(
+                prompt,
+                agent="data_scout",
+                model_type="primary",
+                temperature=0.4,
+                max_tokens=2500
+            )
+
+            if not llm_response:
+                print("Failed to get LLM insights")
+                return None
+
+            # Validate response structure
+            required_keys = [
+                "data_quality_score", "critical_issues", "preprocessing_priorities",
+                "feature_engineering_ideas", "potential_challenges"
+            ]
+
+            if not LLMUtils.validate_json_structure(llm_response, required_keys):
+                print("LLM response missing required fields")
+                return None
+
+            # Calculate confidence score
+            confidence = self._calculate_llm_confidence(llm_response)
+
+            # Create structured insights
+            insights = LLMDataInsights(
+                competition_name=self.competition_name,
+                data_quality_score=min(10, max(1, int(llm_response.get("data_quality_score", 5)))),
+                critical_issues=llm_response.get("critical_issues", [])[:3],
+                preprocessing_priorities=llm_response.get("preprocessing_priorities", [])[:5],
+                feature_engineering_ideas=llm_response.get("feature_engineering_ideas", [])[:8],
+                potential_challenges=llm_response.get("potential_challenges", [])[:3],
+                target_insights=str(llm_response.get("target_insights", ""))[:500],
+                feature_interactions=llm_response.get("feature_interactions", [])[:5],
+                missing_data_strategy=str(llm_response.get("missing_data_strategy", ""))[:300],
+                outlier_strategy=str(llm_response.get("outlier_strategy", ""))[:300],
+                validation_strategy=str(llm_response.get("validation_strategy", ""))[:300],
+                confidence_score=confidence,
+                analysis_timestamp=datetime.now().isoformat()
+            )
+
+            self.llm_insights = insights
+            return insights
+
+        except Exception as e:
+            print(f"Error in LLM analysis: {e}")
+            return None
+
+    def _calculate_llm_confidence(self, llm_response: Dict) -> float:
+        """Calculate confidence score for LLM insights"""
+        confidence = 0.0
+
+        # Check completeness of response
+        if llm_response.get("data_quality_score"):
+            confidence += 0.2
+
+        if len(llm_response.get("critical_issues", [])) >= 2:
+            confidence += 0.2
+
+        if len(llm_response.get("preprocessing_priorities", [])) >= 3:
+            confidence += 0.2
+
+        if len(llm_response.get("feature_engineering_ideas", [])) >= 5:
+            confidence += 0.2
+
+        if llm_response.get("validation_strategy"):
+            confidence += 0.2
+
+        return min(1.0, confidence)
+
+    def _print_llm_insights(self):
+        """Print LLM insights summary"""
+        if not self.llm_insights:
+            return
+
+        insights = self.llm_insights
+        print(f"\nLLM Data Insights (Confidence: {insights.confidence_score:.1%})")
+        print("=" * 40)
+        print(f"Data Quality Score: {insights.data_quality_score}/10")
+
+        if insights.critical_issues:
+            print(f"\nCritical Issues:")
+            for i, issue in enumerate(insights.critical_issues, 1):
+                print(f"  {i}. {issue}")
+
+        if insights.preprocessing_priorities:
+            print(f"\nPreprocessing Priorities:")
+            for i, priority in enumerate(insights.preprocessing_priorities, 1):
+                print(f"  {i}. {priority}")
+
+        if insights.feature_engineering_ideas:
+            print(f"\nFeature Engineering Ideas (Top 5):")
+            for i, idea in enumerate(insights.feature_engineering_ideas[:5], 1):
+                print(f"  {i}. {idea}")
+
+        if insights.target_insights:
+            print(f"\nTarget Analysis:")
+            print(f"  {insights.target_insights}")
+
+        if insights.validation_strategy:
+            print(f"\nRecommended Validation:")
+            print(f"  {insights.validation_strategy}")
+
     def _print_cleaning_summary(self):
         """Print cleaning summary"""
         report = self.quality_report
@@ -422,6 +599,13 @@ class DataScout:
             json.dump(report_dict, f, indent=2)
         print(f"Saved quality report: {report_path}")
 
+        # Save LLM insights if available
+        if self.llm_insights:
+            llm_insights_path = self.output_dir / "llm_insights.json"
+            with open(llm_insights_path, 'w') as f:
+                json.dump(asdict(self.llm_insights), f, indent=2)
+            print(f"Saved LLM insights: {llm_insights_path}")
+
         # Save basic statistics
         stats_path = self.output_dir / "basic_statistics.csv"
         cleaned_df.describe(include='all').to_csv(stats_path)
@@ -440,6 +624,13 @@ class DataScout:
 
         # Clean data
         cleaned_df = self.basic_cleaning()
+
+        # Generate LLM insights if enabled
+        if self.enable_llm and self.llm_coordinator:
+            print("\nStep 4: Generating LLM insights...")
+            self.llm_insights = self.analyze_with_llm()
+            if self.llm_insights:
+                self._print_llm_insights()
 
         # Save outputs
         self.save_outputs(cleaned_df)

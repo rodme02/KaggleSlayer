@@ -1,0 +1,168 @@
+# KaggleSlayer Configuration
+# Main configuration file for all pipeline settings
+
+# LLM Configuration
+llm:
+  # OpenRouter Free Models
+  models:
+    primary:
+      name: "google/gemini-flash-1.5-8b"
+      max_tokens: 2000
+      temperature: 0.7
+      use_case: "general analysis, insights, recommendations"
+
+    code:
+      name: "deepseek/deepseek-coder-6.7b-instruct"
+      max_tokens: 3000
+      temperature: 0.3
+      use_case: "feature engineering, code generation"
+
+    fallback:
+      name: "meta-llama/llama-3.2-3b-instruct"
+      max_tokens: 1500
+      temperature: 0.5
+      use_case: "backup when other models fail"
+
+  # API Settings
+  timeout: 60
+  max_retries: 3
+  cache_responses: true
+  log_all_calls: true
+
+# Pipeline Configuration
+pipeline:
+  # Cross-validation settings
+  cv_folds: 5
+  cv_random_state: 42
+
+  # Hyperparameter optimization
+  optuna_trials: 20
+  optuna_timeout: 300  # seconds per trial
+
+  # Feature engineering
+  max_features_to_create: 25
+  feature_selection_threshold: 0.01
+  polynomial_degree: 2
+
+  # Model training
+  ensemble_size: 3
+  early_stopping_rounds: 50
+
+  # Iteration settings
+  max_iterations: 5
+  improvement_threshold: 0.001  # minimum improvement to continue
+
+  # Safety settings
+  code_execution_timeout: 10  # seconds
+  max_memory_usage: 4096  # MB
+
+# Data Processing
+data:
+  # Missing value thresholds
+  drop_missing_threshold: 0.9  # drop columns with >90% missing
+  impute_missing_threshold: 0.1  # impute if <10% missing
+
+  # Outlier detection
+  outlier_method: "iqr"  # iqr, zscore, isolation_forest
+  outlier_threshold: 1.5
+
+  # Feature selection
+  correlation_threshold: 0.95  # drop highly correlated features
+  variance_threshold: 0.01  # drop low variance features
+
+  # Text processing
+  max_text_features: 1000
+  min_text_frequency: 2
+
+# Model Configuration
+models:
+  # Gradient boosting models
+  xgboost:
+    n_estimators: [100, 300, 500]
+    max_depth: [3, 6, 9]
+    learning_rate: [0.01, 0.1, 0.2]
+    subsample: [0.8, 0.9, 1.0]
+    colsample_bytree: [0.8, 0.9, 1.0]
+
+  lightgbm:
+    n_estimators: [100, 300, 500]
+    max_depth: [3, 6, 9]
+    learning_rate: [0.01, 0.1, 0.2]
+    feature_fraction: [0.8, 0.9, 1.0]
+    bagging_fraction: [0.8, 0.9, 1.0]
+
+  catboost:
+    iterations: [100, 300, 500]
+    depth: [3, 6, 9]
+    learning_rate: [0.01, 0.1, 0.2]
+    l2_leaf_reg: [1, 3, 5]
+
+  # Tree-based models
+  random_forest:
+    n_estimators: [100, 200, 300]
+    max_depth: [5, 10, 15, null]
+    min_samples_split: [2, 5, 10]
+    min_samples_leaf: [1, 2, 4]
+
+  extra_trees:
+    n_estimators: [100, 200, 300]
+    max_depth: [5, 10, 15, null]
+    min_samples_split: [2, 5, 10]
+    min_samples_leaf: [1, 2, 4]
+
+  # Linear models
+  ridge:
+    alpha: [0.1, 1.0, 10.0, 100.0]
+    solver: ["auto", "svd", "cholesky"]
+
+  lasso:
+    alpha: [0.001, 0.01, 0.1, 1.0]
+    max_iter: [1000, 5000, 10000]
+
+  elastic_net:
+    alpha: [0.001, 0.01, 0.1, 1.0]
+    l1_ratio: [0.1, 0.5, 0.7, 0.9]
+
+# Evaluation Metrics
+metrics:
+  classification:
+    primary: "accuracy"
+    additional: ["precision", "recall", "f1", "roc_auc"]
+
+  regression:
+    primary: "neg_mean_squared_error"
+    additional: ["neg_root_mean_squared_error", "r2", "neg_mean_absolute_error"]
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_rotation: true
+  max_file_size: "10MB"
+  backup_count: 5
+
+# Resource Limits
+resources:
+  max_cpu_cores: null  # null = use all available
+  max_memory_gb: null  # null = no limit
+  temp_dir: "temp"
+  cleanup_temp: true
+
+# Competition-specific overrides (optional)
+competition_overrides:
+  titanic:
+    cv_folds: 10  # More folds for small dataset
+    optuna_trials: 50  # More thorough optimization
+
+  house-prices:
+    feature_engineering_depth: "intensive"
+    polynomial_degree: 3
+
+  # Add more competitions as needed
+
+# Dashboard Configuration
+dashboard:
+  refresh_interval: 30  # seconds
+  max_chart_points: 1000
+  show_debug_info: false
+  export_formats: ["csv", "json"]
