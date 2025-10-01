@@ -6,13 +6,13 @@ llm:
   # OpenRouter Free Models
   models:
     primary:
-      name: "google/gemini-flash-1.5-8b"
+      name: "x-ai/grok-4-fast:free"
       max_tokens: 2000
       temperature: 0.7
       use_case: "general analysis, insights, recommendations"
 
     code:
-      name: "deepseek/deepseek-coder-6.7b-instruct"
+      name: "x-ai/grok-4-fast:free"
       max_tokens: 3000
       temperature: 0.3
       use_case: "feature engineering, code generation"

@@ -1,9 +1,37 @@
-venv/
-
+# Environment and credentials
+.env
+*.env.local
 .kaggle/
 
-competition_data/
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data files
+competition_data/
 downloaded_datasets/
 
-.env
+# Logs and results
+*.log
+llm_logs/
+results/
+outputs/
+
+# System files
+.DS_Store
+Thumbs.db
