@@ -5,9 +5,13 @@ Feature generation utilities for creating new features from existing data.
 from typing import List, Dict, Any, Optional, Tuple
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder, PolynomialFeatures
+from sklearn.preprocessing import StandardScaler, LabelEncoder, PolynomialFeatures, KBinsDiscretizer
 from sklearn.feature_selection import SelectKBest, f_classif, f_regression
+from sklearn.cluster import KMeans
+from scipy.stats import skew
 import warnings
+
+from .utils import detect_id_columns, is_numeric_dtype
 
 warnings.filterwarnings('ignore')
 
@@ -21,6 +25,11 @@ class FeatureGenerator:
         self.created_features = []
         self.creation_methods = {}
         self.frequency_encodings = {}  # Store frequency mappings from training data
+        self.target_encodings = {}  # Store target encodings from training data
+        self.high_cardinality_threshold = 0.1  # Columns with >10% unique values are high cardinality
+        self.id_columns = []  # Will be auto-detected
+        self.kmeans_models = {}  # Store KMeans models for clustering features
+        self.binning_transformers = {}  # Store binning transformers
 
     def generate_numerical_features(self, df: pd.DataFrame, target_col: Optional[str] = None) -> pd.DataFrame:
         """Generate numerical features from existing numerical columns."""
@@ -31,9 +40,11 @@ class FeatureGenerator:
         if target_col and target_col in numerical_cols:
             numerical_cols.remove(target_col)
 
-        # Remove ID-like columns that have no predictive value
-        id_columns = ['PassengerId', 'id', 'Id', 'ID', 'index']
-        for id_col in id_columns:
+        # Auto-detect and remove ID columns
+        if not self.id_columns:  # Only detect once
+            self.id_columns = detect_id_columns(df)
+
+        for id_col in self.id_columns:
             if id_col in numerical_cols:
                 numerical_cols.remove(id_col)
 
@@ -111,9 +122,8 @@ class FeatureGenerator:
         if target_col and target_col in numerical_cols:
             numerical_cols.remove(target_col)
 
-        # Remove ID-like columns that have no predictive value
-        id_columns = ['PassengerId', 'id', 'Id', 'ID', 'index']
-        for id_col in id_columns:
+        # Use auto-detected ID columns
+        for id_col in self.id_columns:
             if id_col in numerical_cols:
                 numerical_cols.remove(id_col)
 
@@ -122,16 +132,20 @@ class FeatureGenerator:
 
         print(f"Generating polynomial features (degree {self.polynomial_degree})...")
 
-        # Limit columns to prevent explosion
-        if len(numerical_cols) > 5:
+        # Adaptive limit based on dataset size and degree
+        # Polynomial features grow as C(n+d, d) - limit to prevent explosion
+        max_poly_cols = 10 if self.polynomial_degree == 2 else 5
+
+        if len(numerical_cols) > max_poly_cols:
             # Use feature selection to pick most important columns
             if target_col and target_col in df.columns:
-                selector = SelectKBest(score_func=f_regression, k=5)
+                selector = SelectKBest(score_func=f_regression, k=max_poly_cols)
                 X_selected = selector.fit_transform(df[numerical_cols], df[target_col])
                 selected_indices = selector.get_support(indices=True)
                 numerical_cols = [numerical_cols[i] for i in selected_indices]
             else:
-                numerical_cols = numerical_cols[:5]
+                numerical_cols = numerical_cols[:max_poly_cols]
+            print(f"Limited to {len(numerical_cols)} columns for polynomial features")
 
         poly = PolynomialFeatures(degree=self.polynomial_degree, include_bias=False)
         poly_features = poly.fit_transform(df[numerical_cols])
@@ -193,7 +207,7 @@ class FeatureGenerator:
 
                 # Rarity encoding (inverse of frequency)
                 df_engineered[f"{col}_rarity"] = 1 / df_engineered[f"{col}_freq"]
-                if not fit:
+                if fit:
                     self._record_feature(f"{col}_rarity", f"Rarity encoding of {col}")
 
             # For high-cardinality string columns, extract length and word count
@@ -215,13 +229,79 @@ class FeatureGenerator:
                 df_engineered[f"{col}_is_missing"] = df[col].isna().astype(int)
                 self._record_feature(f"{col}_is_missing", f"Missing value indicator for {col}")
 
-        # DROP original categorical columns after extracting features
-        # This prevents them from being label-encoded and scaled, which destroys information
-        # and causes overfitting (especially for high-cardinality columns like Name, Ticket)
-        print(f"Dropping {len(categorical_cols)} original categorical columns after feature extraction...")
-        df_engineered = df_engineered.drop(columns=categorical_cols, errors='ignore')
+        # NOTE: Keep categorical columns for now - they will be encoded in the transformer
+        # Only drop high-cardinality text columns that we've already extracted features from
+        high_cardinality_cols = [col for col in categorical_cols
+                                 if df[col].nunique() > len(df) * 0.1]
+        if high_cardinality_cols:
+            print(f"Dropping {len(high_cardinality_cols)} high-cardinality text columns after feature extraction...")
+            df_engineered = df_engineered.drop(columns=high_cardinality_cols, errors='ignore')
 
         return df_engineered
+
+    def generate_target_encoding(self, df: pd.DataFrame, target_col: str,
+                                 categorical_cols: Optional[List[str]] = None,
+                                 fit: bool = True, smoothing: float = 1.0) -> pd.DataFrame:
+        """
+        Generate target encoding for categorical features.
+        Uses smoothing to prevent overfitting.
+
+        Args:
+            df: Input dataframe
+            target_col: Target column name
+            categorical_cols: List of categorical columns to encode (auto-detect if None)
+            fit: If True, compute encodings from training data
+            smoothing: Smoothing parameter (higher = more regularization)
+        """
+        if target_col not in df.columns:
+            return df
+
+        df_encoded = df.copy()
+
+        if categorical_cols is None:
+            categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+            if target_col in categorical_cols:
+                categorical_cols.remove(target_col)
+
+        if len(categorical_cols) == 0:
+            return df_encoded
+
+        # Global mean for smoothing
+        global_mean = df[target_col].mean() if fit else None
+
+        for col in categorical_cols:
+            if col not in df.columns:
+                continue
+
+            if fit:
+                # Calculate mean target per category with smoothing
+                category_stats = df.groupby(col)[target_col].agg(['mean', 'count'])
+
+                # Smoothed mean = (count * category_mean + smoothing * global_mean) / (count + smoothing)
+                category_stats['smoothed_mean'] = (
+                    (category_stats['count'] * category_stats['mean'] + smoothing * global_mean) /
+                    (category_stats['count'] + smoothing)
+                )
+
+                # Store encoding
+                self.target_encodings[col] = {
+                    'encoding': category_stats['smoothed_mean'].to_dict(),
+                    'global_mean': global_mean
+                }
+
+                # Apply encoding
+                df_encoded[f"{col}_target_enc"] = df[col].map(self.target_encodings[col]['encoding'])
+                self._record_feature(f"{col}_target_enc", f"Target encoding of {col}")
+            else:
+                # Use stored encoding
+                if col in self.target_encodings:
+                    encoding = self.target_encodings[col]['encoding']
+                    global_mean_stored = self.target_encodings[col]['global_mean']
+
+                    # For unseen categories, use global mean
+                    df_encoded[f"{col}_target_enc"] = df[col].map(encoding).fillna(global_mean_stored)
+
+        return df_encoded
 
     def generate_datetime_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Generate features from datetime columns."""
@@ -273,18 +353,19 @@ class FeatureGenerator:
         if target_col and target_col in numerical_cols:
             numerical_cols.remove(target_col)
 
-        # Remove ID-like columns that have no predictive value
-        id_columns = ['PassengerId', 'id', 'Id', 'ID', 'index']
-        for id_col in id_columns:
+        # Use auto-detected ID columns
+        for id_col in self.id_columns:
             if id_col in numerical_cols:
                 numerical_cols.remove(id_col)
 
-        if len(numerical_cols) == 0:
+        # Only create statistical features if we have enough columns
+        if len(numerical_cols) < 3:
+            print(f"Skipping statistical features (need 3+ numerical columns, have {len(numerical_cols)})")
             return df_engineered
 
-        print("Generating statistical features...")
+        print(f"Generating statistical features from {len(numerical_cols)} columns...")
 
-        # Row-wise statistics
+        # Row-wise statistics - only meaningful with multiple features
         df_engineered['row_sum'] = df[numerical_cols].sum(axis=1)
         df_engineered['row_mean'] = df[numerical_cols].mean(axis=1)
         df_engineered['row_std'] = df[numerical_cols].std(axis=1)
@@ -297,6 +378,208 @@ class FeatureGenerator:
             self._record_feature(f"row_{stat}", f"Row-wise {stat} of numerical features")
 
         return df_engineered
+
+    def generate_clustering_features(self, df: pd.DataFrame, target_col: Optional[str] = None,
+                                    n_clusters: int = 5, fit: bool = True) -> pd.DataFrame:
+        """
+        Generate clustering-based features using KMeans.
+
+        Args:
+            df: Input dataframe
+            target_col: Target column to exclude
+            n_clusters: Number of clusters
+            fit: If True, fit new KMeans models
+        """
+        df_clustered = df.copy()
+        numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+        # Exclude target and ID columns
+        if target_col and target_col in numerical_cols:
+            numerical_cols.remove(target_col)
+
+        for id_col in self.id_columns:
+            if id_col in numerical_cols:
+                numerical_cols.remove(id_col)
+
+        if len(numerical_cols) < 2:
+            return df_clustered
+
+        print(f"Generating clustering features with {n_clusters} clusters...")
+
+        # Use a subset of features to prevent overfitting (max 10 features)
+        if len(numerical_cols) > 10:
+            # Use features with highest variance
+            variances = df[numerical_cols].var().sort_values(ascending=False)
+            selected_cols = variances.head(10).index.tolist()
+        else:
+            selected_cols = numerical_cols
+
+        try:
+            if fit:
+                # Fit KMeans
+                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                df_clustered['cluster_label'] = kmeans.fit_predict(df[selected_cols].fillna(0))
+
+                # Store model
+                self.kmeans_models['default'] = {
+                    'model': kmeans,
+                    'features': selected_cols
+                }
+
+                # Distance to each cluster center
+                distances = kmeans.transform(df[selected_cols].fillna(0))
+                for i in range(n_clusters):
+                    df_clustered[f'cluster_dist_{i}'] = distances[:, i]
+                    self._record_feature(f'cluster_dist_{i}', f"Distance to cluster {i}")
+
+                # Distance to nearest cluster
+                df_clustered['cluster_min_dist'] = distances.min(axis=1)
+                self._record_feature('cluster_min_dist', "Distance to nearest cluster")
+                self._record_feature('cluster_label', "Cluster assignment")
+
+            else:
+                # Use stored model
+                if 'default' in self.kmeans_models:
+                    kmeans = self.kmeans_models['default']['model']
+                    selected_cols = self.kmeans_models['default']['features']
+
+                    # Ensure all features exist
+                    available_cols = [col for col in selected_cols if col in df.columns]
+                    if len(available_cols) > 0:
+                        df_clustered['cluster_label'] = kmeans.predict(df[available_cols].fillna(0))
+
+                        distances = kmeans.transform(df[available_cols].fillna(0))
+                        for i in range(n_clusters):
+                            df_clustered[f'cluster_dist_{i}'] = distances[:, i]
+
+                        df_clustered['cluster_min_dist'] = distances.min(axis=1)
+
+        except Exception as e:
+            print(f"Warning: Clustering feature generation failed: {e}")
+
+        return df_clustered
+
+    def generate_binning_features(self, df: pd.DataFrame, target_col: Optional[str] = None,
+                                 n_bins: int = 5, fit: bool = True) -> pd.DataFrame:
+        """
+        Generate binning/discretization features for numerical columns.
+
+        Args:
+            df: Input dataframe
+            target_col: Target column to exclude
+            n_bins: Number of bins
+            fit: If True, fit new binning transformers
+        """
+        df_binned = df.copy()
+        numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+        # Exclude target and ID columns
+        if target_col and target_col in numerical_cols:
+            numerical_cols.remove(target_col)
+
+        for id_col in self.id_columns:
+            if id_col in numerical_cols:
+                numerical_cols.remove(id_col)
+
+        if len(numerical_cols) == 0:
+            return df_binned
+
+        print(f"Generating binning features ({n_bins} bins) for numerical columns...")
+
+        # Only bin columns with high variance or skewness (more informative)
+        cols_to_bin = []
+        for col in numerical_cols:
+            if df[col].nunique() > n_bins:  # Only bin if we have enough unique values
+                col_skew = abs(df[col].skew())
+                col_std = df[col].std()
+                if col_skew > 0.5 or col_std > df[col].mean():  # High skew or variance
+                    cols_to_bin.append(col)
+
+        # Limit to top 10 columns to prevent feature explosion
+        cols_to_bin = cols_to_bin[:10]
+
+        if len(cols_to_bin) == 0:
+            return df_binned
+
+        for col in cols_to_bin:
+            try:
+                if fit:
+                    # Fit binning transformer
+                    binner = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='quantile')
+                    df_binned[f'{col}_binned'] = binner.fit_transform(df[[col]].fillna(df[col].median()))
+
+                    self.binning_transformers[col] = binner
+                    self._record_feature(f'{col}_binned', f"Binned version of {col} ({n_bins} quantile bins)")
+                else:
+                    # Use stored transformer
+                    if col in self.binning_transformers:
+                        binner = self.binning_transformers[col]
+                        df_binned[f'{col}_binned'] = binner.transform(df[[col]].fillna(df[col].median()))
+
+            except Exception as e:
+                print(f"Warning: Binning failed for {col}: {e}")
+                continue
+
+        return df_binned
+
+    def generate_timeseries_features(self, df: pd.DataFrame, datetime_col: str,
+                                    value_cols: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        Generate time-series features like lags, rolling statistics, and differences.
+
+        Args:
+            df: Input dataframe (must be sorted by datetime_col)
+            datetime_col: Name of the datetime column
+            value_cols: Columns to generate time-series features for (auto-detect if None)
+        """
+        if datetime_col not in df.columns:
+            return df
+
+        df_ts = df.copy()
+
+        # Auto-detect numerical columns if not specified
+        if value_cols is None:
+            value_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            # Remove ID columns
+            value_cols = [col for col in value_cols if col not in self.id_columns]
+
+        if len(value_cols) == 0:
+            return df_ts
+
+        print(f"Generating time-series features for {len(value_cols)} columns...")
+
+        # Limit to top 5 columns to prevent explosion
+        value_cols = value_cols[:5]
+
+        for col in value_cols:
+            if col not in df.columns:
+                continue
+
+            try:
+                # Lag features (previous values)
+                for lag in [1, 2, 3, 7]:
+                    df_ts[f'{col}_lag_{lag}'] = df[col].shift(lag)
+                    self._record_feature(f'{col}_lag_{lag}', f"Lag {lag} of {col}")
+
+                # Rolling statistics
+                for window in [3, 7, 14]:
+                    if len(df) >= window:
+                        df_ts[f'{col}_rolling_mean_{window}'] = df[col].rolling(window=window, min_periods=1).mean()
+                        df_ts[f'{col}_rolling_std_{window}'] = df[col].rolling(window=window, min_periods=1).std()
+                        self._record_feature(f'{col}_rolling_mean_{window}', f"Rolling mean (window={window}) of {col}")
+                        self._record_feature(f'{col}_rolling_std_{window}', f"Rolling std (window={window}) of {col}")
+
+                # Difference features (change from previous)
+                df_ts[f'{col}_diff_1'] = df[col].diff(1)
+                df_ts[f'{col}_pct_change'] = df[col].pct_change(1)
+                self._record_feature(f'{col}_diff_1', f"First difference of {col}")
+                self._record_feature(f'{col}_pct_change', f"Percent change of {col}")
+
+            except Exception as e:
+                print(f"Warning: Time-series feature generation failed for {col}: {e}")
+                continue
+
+        return df_ts
 
     def _record_feature(self, feature_name: str, description: str):
         """Record a created feature and its description."""

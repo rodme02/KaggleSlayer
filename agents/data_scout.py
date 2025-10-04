@@ -8,7 +8,6 @@ from pathlib import Path
 
 from .base_agent import BaseAgent
 from core.data import CompetitionDataLoader, DataPreprocessor, DataValidator
-from core.analysis import InsightGenerator
 from utils.config import ConfigManager
 
 
@@ -26,7 +25,6 @@ class DataScoutAgent(BaseAgent):
             outlier_threshold=self.get_config("data.outlier_threshold", 3.0)
         )
         self.validator = DataValidator()
-        self.insight_generator = InsightGenerator()
 
     def run(self, save_cleaned_data: bool = True) -> Dict[str, Any]:
         """Run the complete data scouting process."""
@@ -47,19 +45,40 @@ class DataScoutAgent(BaseAgent):
 
             # Analyze feature types
             feature_types = self.data_loader.analyze_feature_types(train_df)
+            self.log_info(f"Feature types detected: {len([k for k,v in feature_types.items() if v == 'identifier'])} identifiers, "
+                         f"{len([k for k,v in feature_types.items() if v == 'categorical'])} categorical, "
+                         f"{len([k for k,v in feature_types.items() if v == 'numerical'])} numerical")
 
             # Clean data
             if not validation_result.is_valid:
                 self.log_warning(f"Data validation issues found: {validation_result.issues}")
 
-            train_cleaned = self.preprocessor.handle_missing_values(train_df)
-            train_cleaned, duplicates_removed = self.preprocessor.remove_duplicates(train_cleaned)
-
+            # Parse datetime features first
+            train_cleaned = self.preprocessor.parse_and_extract_datetime(train_df)
             if test_df is not None:
-                test_cleaned = self.preprocessor.handle_missing_values(test_df)
-                test_cleaned, _ = self.preprocessor.remove_duplicates(test_cleaned)
+                test_cleaned = self.preprocessor.parse_and_extract_datetime(test_df)
             else:
                 test_cleaned = None
+
+            # Handle missing values with fit/transform pattern
+            train_cleaned = self.preprocessor.handle_missing_values(
+                train_cleaned, fit=True, target_col=target_column
+            )
+            if test_cleaned is not None:
+                test_cleaned = self.preprocessor.handle_missing_values(
+                    test_cleaned, fit=False, target_col=target_column
+                )
+
+            # Remove duplicates
+            train_cleaned, duplicates_removed = self.preprocessor.remove_duplicates(train_cleaned)
+            if test_cleaned is not None:
+                test_cleaned, _ = self.preprocessor.remove_duplicates(test_cleaned)
+
+            # Handle outliers (winsorize to 1-99 percentile)
+            exclude_cols = [target_column] if target_column else []
+            train_cleaned = self.preprocessor.handle_outliers(
+                train_cleaned, method="winsorize", exclude_columns=exclude_cols
+            )
 
             # Get statistics
             stats = self.preprocessor.get_basic_statistics(train_cleaned)
@@ -100,13 +119,13 @@ class DataScoutAgent(BaseAgent):
 
             # Save cleaned data if requested
             if save_cleaned_data:
-                self.file_manager.save_dataframe(train_cleaned, "train_cleaned.csv")
+                self.file_manager.save_processed_data(train_cleaned, "train_cleaned.csv")
                 if test_cleaned is not None:
-                    self.file_manager.save_dataframe(test_cleaned, "test_cleaned.csv")
+                    self.file_manager.save_processed_data(test_cleaned, "test_cleaned.csv")
                 self.log_info("Saved cleaned datasets")
 
             # Save results
-            self.save_results(results, "data_scout_results.json")
+            self.file_manager.save_results(results, "data_scout_results.json")
 
             self.log_info("Data scouting completed successfully")
             return results
@@ -118,11 +137,11 @@ class DataScoutAgent(BaseAgent):
     def get_cleaned_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         """Load the cleaned datasets."""
         try:
-            train_df = self.file_manager.load_dataframe("train_cleaned.csv")
+            train_df = self.file_manager.load_processed_data("train_cleaned.csv")
             test_df = None
 
-            if self.file_manager.file_exists("test_cleaned.csv"):
-                test_df = self.file_manager.load_dataframe("test_cleaned.csv")
+            if self.file_manager.file_exists(f"{self.file_manager.processed_dir}/test_cleaned.csv"):
+                test_df = self.file_manager.load_processed_data("test_cleaned.csv")
 
             return train_df, test_df
 

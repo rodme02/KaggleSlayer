@@ -90,7 +90,7 @@ class ModelFactory:
         return models
 
     def create_model(self, model_name: str, parameters: Optional[Dict[str, Any]] = None,
-                    problem_type: Optional[str] = None) -> Any:
+                    problem_type: Optional[str] = None, class_weight: Optional[str] = None) -> Any:
         """Create a model instance with given parameters."""
         if problem_type is None:
             problem_type = self.problem_type
@@ -101,6 +101,13 @@ class ModelFactory:
         # Add random state to parameters if not present
         if 'random_state' not in parameters and self._model_supports_random_state(model_name):
             parameters['random_state'] = self.random_state
+
+        # Add class_weight for imbalanced classification if applicable
+        if class_weight is not None and self._model_supports_class_weight(model_name):
+            parameters['class_weight'] = class_weight
+
+        # Ensure default verbosity settings for models
+        parameters = self._apply_verbosity_defaults(model_name, parameters)
 
         try:
             if problem_type == "classification":
@@ -172,7 +179,7 @@ class ModelFactory:
             'svm': {'kernel': 'rbf', 'C': 10.0, 'gamma': 'scale'},
             'svr': {'kernel': 'rbf', 'C': 10.0, 'gamma': 'scale'},
             'xgboost': {
-                'n_estimators': 200,
+                'n_estimators': 1000,  # Increased - will use early stopping when training
                 'max_depth': 6,
                 'learning_rate': 0.05,
                 'subsample': 0.8,
@@ -182,7 +189,7 @@ class ModelFactory:
                 'n_jobs': -1
             },
             'lightgbm': {
-                'n_estimators': 200,
+                'n_estimators': 1000,  # Increased - will use early stopping when training
                 'max_depth': 7,
                 'learning_rate': 0.05,
                 'feature_fraction': 0.8,
@@ -193,7 +200,7 @@ class ModelFactory:
                 'verbose': -1
             },
             'catboost': {
-                'iterations': 200,
+                'iterations': 1000,  # Increased - will use early stopping when training
                 'depth': 6,
                 'learning_rate': 0.05,
                 'l2_leaf_reg': 3,
@@ -209,41 +216,44 @@ class ModelFactory:
         if problem_type == "classification":
             spaces = {
                 'random_forest': {
-                    'n_estimators': [100, 200, 300],
-                    'max_depth': [5, 10, 15, None],
-                    'min_samples_split': [2, 5, 10],
-                    'min_samples_leaf': [1, 2, 4]
+                    'n_estimators': [50, 100, 150],
+                    'max_depth': [3, 5, 7, 10],
+                    'min_samples_split': [5, 10, 20],
+                    'min_samples_leaf': [2, 4, 8]
                 },
                 'extra_trees': {
-                    'n_estimators': [100, 200, 300],
-                    'max_depth': [5, 10, 15, None],
-                    'min_samples_split': [2, 5, 10],
-                    'min_samples_leaf': [1, 2, 4]
+                    'n_estimators': [50, 100, 150],
+                    'max_depth': [3, 5, 7, 10],
+                    'min_samples_split': [5, 10, 20],
+                    'min_samples_leaf': [2, 4, 8]
                 },
                 'logistic_regression': {
-                    'C': [0.001, 0.01, 0.1, 1.0, 10.0],
+                    'C': [0.01, 0.1, 1.0, 10.0],
                     'solver': ['liblinear', 'lbfgs'],
                     'penalty': ['l1', 'l2']
                 },
                 'xgboost': {
-                    'n_estimators': [100, 300, 500],
-                    'max_depth': [3, 6, 9],
-                    'learning_rate': [0.01, 0.1, 0.2],
-                    'subsample': [0.8, 0.9, 1.0],
-                    'colsample_bytree': [0.8, 0.9, 1.0]
+                    'n_estimators': [50, 100, 200],
+                    'max_depth': [2, 3, 4, 5],
+                    'learning_rate': [0.01, 0.05, 0.1],
+                    'subsample': [0.6, 0.7, 0.8],
+                    'colsample_bytree': [0.6, 0.7, 0.8],
+                    'reg_alpha': [0, 0.01, 0.1],
+                    'reg_lambda': [1, 1.5, 2]
                 },
                 'lightgbm': {
-                    'n_estimators': [100, 300, 500],
-                    'max_depth': [3, 6, 9],
-                    'learning_rate': [0.01, 0.1, 0.2],
-                    'feature_fraction': [0.8, 0.9, 1.0],
-                    'bagging_fraction': [0.8, 0.9, 1.0]
+                    'n_estimators': [50, 100, 200],
+                    'max_depth': [2, 3, 4, 5],
+                    'learning_rate': [0.01, 0.05, 0.1],
+                    'feature_fraction': [0.6, 0.7, 0.8],
+                    'bagging_fraction': [0.6, 0.7, 0.8],
+                    'min_child_samples': [20, 30, 40]
                 },
                 'catboost': {
-                    'iterations': [100, 300, 500],
-                    'depth': [3, 6, 9],
-                    'learning_rate': [0.01, 0.1, 0.2],
-                    'l2_leaf_reg': [1, 3, 5]
+                    'iterations': [50, 100, 200],
+                    'depth': [2, 3, 4, 5],
+                    'learning_rate': [0.01, 0.05, 0.1],
+                    'l2_leaf_reg': [3, 5, 7, 10]
                 }
             }
         else:  # regression
@@ -268,6 +278,19 @@ class ModelFactory:
                     'learning_rate': [0.01, 0.1, 0.2],
                     'subsample': [0.8, 0.9, 1.0],
                     'colsample_bytree': [0.8, 0.9, 1.0]
+                },
+                'lightgbm': {
+                    'n_estimators': [100, 300, 500],
+                    'max_depth': [3, 6, 9],
+                    'learning_rate': [0.01, 0.1, 0.2],
+                    'feature_fraction': [0.8, 0.9, 1.0],
+                    'bagging_fraction': [0.8, 0.9, 1.0]
+                },
+                'catboost': {
+                    'iterations': [100, 300, 500],
+                    'depth': [3, 6, 9],
+                    'learning_rate': [0.01, 0.1, 0.2],
+                    'l2_leaf_reg': [1, 3, 5]
                 }
             }
 
@@ -280,3 +303,100 @@ class ModelFactory:
             'xgboost', 'lightgbm'
         ]
         return model_name in models_with_random_state
+
+    def _model_supports_class_weight(self, model_name: str) -> bool:
+        """Check if model supports class_weight parameter."""
+        # sklearn models that support class_weight
+        models_with_class_weight = [
+            'random_forest', 'extra_trees', 'logistic_regression', 'svm'
+        ]
+        return model_name in models_with_class_weight
+
+    def _apply_verbosity_defaults(self, model_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply verbosity defaults for models that support it."""
+        verbosity_settings = {
+            'catboost': {'verbose': False},
+            'lightgbm': {'verbose': -1},
+            'xgboost': {'verbosity': 0}
+        }
+
+        if model_name in verbosity_settings:
+            for key, value in verbosity_settings[model_name].items():
+                if key not in parameters:
+                    parameters[key] = value
+
+        return parameters
+
+    def fit_with_early_stopping(self, model: Any, model_name: str, X, y, validation_split: float = 0.2):
+        """
+        Fit model with early stopping for boosting models.
+
+        Args:
+            model: Model instance
+            model_name: Name of the model
+            X: Features
+            y: Target
+            validation_split: Fraction of data to use for validation
+        """
+        boosting_models = ['xgboost', 'lightgbm', 'catboost']
+
+        if model_name not in boosting_models or len(X) < 100:
+            # Regular fit for non-boosting models or small datasets
+            model.fit(X, y)
+            return model
+
+        # Split for validation
+        from sklearn.model_selection import train_test_split
+        try:
+            # Try stratified split for classification
+            if hasattr(y, 'nunique') and y.nunique() < 20:
+                X_train, X_val, y_train, y_val = train_test_split(
+                    X, y, test_size=validation_split, random_state=self.random_state, stratify=y
+                )
+            else:
+                X_train, X_val, y_train, y_val = train_test_split(
+                    X, y, test_size=validation_split, random_state=self.random_state
+                )
+        except:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X, y, test_size=validation_split, random_state=self.random_state
+            )
+
+        # Fit with validation set for early stopping
+        if model_name == 'xgboost':
+            # XGBoost 2.0+ uses callbacks for early stopping
+            try:
+                from xgboost.callback import EarlyStopping
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    callbacks=[EarlyStopping(rounds=50)],
+                    verbose=False
+                )
+            except ImportError:
+                # Fallback for older XGBoost versions
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    early_stopping_rounds=50,
+                    verbose=False
+                )
+        elif model_name == 'lightgbm':
+            try:
+                import lightgbm as lgb
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    callbacks=[lgb.early_stopping(50, verbose=False)]
+                )
+            except:
+                model.fit(X_train, y_train)
+        elif model_name == 'catboost':
+            model.fit(
+                X_train, y_train,
+                eval_set=(X_val, y_val),
+                early_stopping_rounds=50,
+                verbose=False
+            )
+
+        return model

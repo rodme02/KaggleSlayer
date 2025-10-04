@@ -25,7 +25,9 @@
       "Bash(tee:*)",
       "Bash(git mv:*)",
       "Bash(\"C:\\Users\\rodri\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" -m pip install xgboost lightgbm catboost)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(cat:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

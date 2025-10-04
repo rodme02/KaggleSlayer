@@ -21,6 +21,9 @@ class BaseAgent(LoggerMixin, ABC):
         self.config = config or ConfigManager()
         self.file_manager = FileManager(self.competition_path)
 
+        # Setup organized directory structure
+        self.file_manager.setup_directories()
+
         self.log_info(f"Initialized {self.__class__.__name__} for competition: {competition_name}")
 
     @abstractmethod
@@ -30,13 +33,13 @@ class BaseAgent(LoggerMixin, ABC):
 
     def save_results(self, results: Dict[str, Any], filename: str) -> None:
         """Save agent results to file."""
-        self.file_manager.save_json(results, filename)
+        self.file_manager.save_results(results, filename)
         self.log_info(f"Saved results to {filename}")
 
     def load_results(self, filename: str) -> Dict[str, Any]:
         """Load agent results from file."""
         try:
-            results = self.file_manager.load_json(filename)
+            results = self.file_manager.load_results(filename)
             self.log_info(f"Loaded results from {filename}")
             return results
         except FileNotFoundError:

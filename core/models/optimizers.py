@@ -33,11 +33,14 @@ class OptimizationResult:
 class HyperparameterOptimizer:
     """Optimizes model hyperparameters using Optuna."""
 
-    def __init__(self, n_trials: int = 20, timeout: int = 300, cv_folds: int = 5, random_state: int = 42):
+    def __init__(self, n_trials: int = 20, timeout: int = 300, cv_folds: int = 5, random_state: int = 42,
+                 classification_metric: str = 'accuracy', regression_metric: str = 'neg_mean_squared_error'):
         self.n_trials = n_trials
         self.timeout = timeout
         self.cv_folds = cv_folds
         self.random_state = random_state
+        self.classification_metric = classification_metric
+        self.regression_metric = regression_metric
 
         if not OPTUNA_AVAILABLE:
             print("Warning: Optuna not available. Hyperparameter optimization will use grid search fallback.")
@@ -87,10 +90,13 @@ class HyperparameterOptimizer:
                 return np.mean(cv_scores)
             except Exception as e:
                 print(f"Trial failed: {e}")
-                return float('-inf') if problem_type == "classification" else float('inf')
+                return float('-inf')  # Always minimize after metric conversion
 
-        # Create study
-        direction = "maximize" if problem_type == "classification" else "minimize"
+        # Create study - determine direction based on metric
+        # CRITICAL FIX: We convert negative metrics to positive in _cross_validate,
+        # so after conversion, we always maximize (higher is better)
+        # This is correct for both positive metrics (accuracy) and converted negative metrics (MSE→-MSE)
+        direction = "maximize"
         study = optuna.create_study(direction=direction, sampler=optuna.samplers.TPESampler(seed=self.random_state))
 
         # Optimize
@@ -113,7 +119,7 @@ class HyperparameterOptimizer:
         param_names = list(param_space.keys())
         param_values = list(param_space.values())
 
-        best_score = float('-inf') if problem_type == "classification" else float('inf')
+        best_score = float('-inf')  # Always maximize after metric conversion
         best_params = {}
         n_trials = 0
 
@@ -129,10 +135,8 @@ class HyperparameterOptimizer:
                 cv_scores = self._cross_validate(model, X_train, y_train, problem_type)
                 score = np.mean(cv_scores)
 
-                if problem_type == "classification" and score > best_score:
-                    best_score = score
-                    best_params = params
-                elif problem_type == "regression" and score < best_score:
+                # Always maximize (after negative metric conversion)
+                if score > best_score:
                     best_score = score
                     best_params = params
 
@@ -152,16 +156,18 @@ class HyperparameterOptimizer:
     def _cross_validate(self, model: Any, X: pd.DataFrame, y: pd.Series, problem_type: str) -> List[float]:
         """Perform cross-validation."""
         try:
+            # Use configurable metric
             if problem_type == "classification":
                 cv = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
-                scoring = 'accuracy'
+                scoring = self.classification_metric
             else:
                 cv = KFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
-                scoring = 'neg_mean_squared_error'
+                scoring = self.regression_metric
 
             scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
 
-            if scoring == 'neg_mean_squared_error':
+            # Convert negative metrics to positive for consistency
+            if scoring.startswith('neg_'):
                 scores = -scores
 
             return scores.tolist()

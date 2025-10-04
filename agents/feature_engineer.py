@@ -50,13 +50,15 @@ class FeatureEngineerAgent(BaseAgent):
             train_engineered = self.generator.generate_numerical_features(train_df, target_column)
             train_engineered = self.generator.generate_categorical_features(train_engineered, target_column, fit=True)
             train_engineered = self.generator.generate_statistical_features(train_engineered, target_column)
-            train_engineered = self.generator.generate_polynomial_features(train_engineered, target_column)
+            # Skip polynomial features to reduce overfitting
+            # train_engineered = self.generator.generate_polynomial_features(train_engineered, target_column)
 
             if test_df is not None:
                 test_engineered = self.generator.generate_numerical_features(test_df, target_column)
                 test_engineered = self.generator.generate_categorical_features(test_engineered, target_column, fit=False)
                 test_engineered = self.generator.generate_statistical_features(test_engineered, target_column)
-                test_engineered = self.generator.generate_polynomial_features(test_engineered, target_column)
+                # Skip polynomial features to reduce overfitting
+                # test_engineered = self.generator.generate_polynomial_features(test_engineered, target_column)
             else:
                 test_engineered = None
 
@@ -76,8 +78,8 @@ class FeatureEngineerAgent(BaseAgent):
             train_selected = self.selector.remove_low_variance_features(train_selected, target_column, fit=True)
             train_selected = self.selector.remove_highly_correlated_features(train_selected, target_column)
 
-            # Step 3: Select best features
-            train_selected = self.selector.select_univariate_features(train_selected, target_column, k=50)
+            # Step 3: Select best features (fewer features to reduce overfitting)
+            train_selected = self.selector.select_univariate_features(train_selected, target_column, k=20)
 
             if test_engineered is not None:
                 # Apply same selection to test data (transform only)
@@ -133,9 +135,9 @@ class FeatureEngineerAgent(BaseAgent):
 
             # Save engineered data
             if save_engineered_data:
-                self.file_manager.save_dataframe(train_final, "train_engineered.csv")
+                self.file_manager.save_processed_data(train_final, "train_engineered.csv")
                 if test_final is not None:
-                    self.file_manager.save_dataframe(test_final, "test_engineered.csv")
+                    self.file_manager.save_processed_data(test_final, "test_engineered.csv")
                 self.log_info("Saved engineered datasets")
 
             # Save results
@@ -151,11 +153,11 @@ class FeatureEngineerAgent(BaseAgent):
     def get_engineered_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         """Load the engineered datasets."""
         try:
-            train_df = self.file_manager.load_dataframe("train_engineered.csv")
+            train_df = self.file_manager.load_processed_data("train_engineered.csv")
             test_df = None
 
-            if self.file_manager.file_exists("test_engineered.csv"):
-                test_df = self.file_manager.load_dataframe("test_engineered.csv")
+            if self.file_manager.file_exists(f"{self.file_manager.processed_dir}/test_engineered.csv"):
+                test_df = self.file_manager.load_processed_data("test_engineered.csv")
 
             return train_df, test_df
 
@@ -167,11 +169,11 @@ class FeatureEngineerAgent(BaseAgent):
     def _load_cleaned_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         """Load cleaned data from data scout."""
         try:
-            train_df = self.file_manager.load_dataframe("train_cleaned.csv")
+            train_df = self.file_manager.load_processed_data("train_cleaned.csv")
             test_df = None
 
-            if self.file_manager.file_exists("test_cleaned.csv"):
-                test_df = self.file_manager.load_dataframe("test_cleaned.csv")
+            if self.file_manager.file_exists(f"{self.file_manager.processed_dir}/test_cleaned.csv"):
+                test_df = self.file_manager.load_processed_data("test_cleaned.csv")
 
             return train_df, test_df
 

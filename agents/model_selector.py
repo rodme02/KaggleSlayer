@@ -234,11 +234,11 @@ class ModelSelectorAgent(BaseAgent):
     def _load_engineered_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         """Load engineered data from feature engineer."""
         try:
-            train_df = self.file_manager.load_dataframe("train_engineered.csv")
+            train_df = self.file_manager.load_processed_data("train_engineered.csv")
             test_df = None
 
-            if self.file_manager.file_exists("test_engineered.csv"):
-                test_df = self.file_manager.load_dataframe("test_engineered.csv")
+            if self.file_manager.file_exists(f"{self.file_manager.processed_dir}/test_engineered.csv"):
+                test_df = self.file_manager.load_processed_data("test_engineered.csv")
 
             return train_df, test_df
 

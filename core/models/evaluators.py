@@ -34,9 +34,12 @@ class EvaluationResult:
 class ModelEvaluator:
     """Evaluates model performance using various metrics and validation strategies."""
 
-    def __init__(self, cv_folds: int = 5, random_state: int = 42):
+    def __init__(self, cv_folds: int = 5, random_state: int = 42,
+                 classification_metric: str = 'accuracy', regression_metric: str = 'neg_mean_squared_error'):
         self.cv_folds = cv_folds
         self.random_state = random_state
+        self.classification_metric = classification_metric
+        self.regression_metric = regression_metric
 
     def evaluate_model(self, model: Any, X_train: pd.DataFrame, y_train: pd.Series,
                       X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None,
@@ -91,18 +94,19 @@ class ModelEvaluator:
                        problem_type: str) -> List[float]:
         """Perform cross-validation."""
         try:
-            # Choose appropriate cross-validation strategy
+            # Choose appropriate cross-validation strategy and metric
             if problem_type == "classification":
                 cv = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
-                scoring = 'accuracy'
+                scoring = self.classification_metric
             else:
                 cv = KFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
-                scoring = 'neg_mean_squared_error'
+                scoring = self.regression_metric
 
             scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
 
-            # Convert negative MSE to positive for consistency
-            if scoring == 'neg_mean_squared_error':
+            # Convert negative metrics to positive for consistency
+            # This allows us to always use "higher is better" logic
+            if scoring.startswith('neg_'):
                 scores = -scores
 
             return scores.tolist()

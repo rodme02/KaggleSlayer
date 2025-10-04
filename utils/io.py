@@ -10,12 +10,27 @@ import pandas as pd
 
 
 class FileManager:
-    """Manages file I/O operations for the pipeline."""
+    """Manages file I/O operations for the pipeline with organized subdirectories.
+
+    Directory structure:
+        base_path/
+        ├── raw/         # Downloaded CSV files
+        ├── processed/   # Cleaned and engineered data
+        ├── models/      # Saved models
+        ├── results/     # JSON result files
+        └── submission.csv  # Final submission
+    """
 
     def __init__(self, base_path: Optional[Path] = None):
         if base_path is None:
             base_path = Path.cwd()
         self.base_path = Path(base_path)
+
+        # Define subdirectories
+        self.raw_dir = "raw"
+        self.processed_dir = "processed"
+        self.models_dir = "models"
+        self.results_dir = "results"
 
     def save_json(self, data: Dict[str, Any], file_path: Union[str, Path]) -> None:
         """Save data as JSON file."""
@@ -131,3 +146,51 @@ class FileManager:
     def get_file_path(self, file_path: Union[str, Path]) -> Path:
         """Get full path for a file."""
         return self.base_path / file_path
+
+    # Organized directory helpers
+    def save_processed_data(self, df: pd.DataFrame, filename: str) -> None:
+        """Save processed data to processed/ subdirectory."""
+        self.save_dataframe(df, f"{self.processed_dir}/{filename}")
+
+    def load_processed_data(self, filename: str) -> pd.DataFrame:
+        """Load processed data from processed/ subdirectory."""
+        return self.load_dataframe(f"{self.processed_dir}/{filename}")
+
+    def save_model(self, model: Any, filename: str) -> None:
+        """Save model to models/ subdirectory."""
+        self.save_pickle(model, f"{self.models_dir}/{filename}")
+
+    def load_model(self, filename: str) -> Any:
+        """Load model from models/ subdirectory."""
+        return self.load_pickle(f"{self.models_dir}/{filename}")
+
+    def save_results(self, data: Dict[str, Any], filename: str) -> None:
+        """Save results to results/ subdirectory."""
+        self.save_json(data, f"{self.results_dir}/{filename}")
+
+    def load_results(self, filename: str) -> Dict[str, Any]:
+        """Load results from results/ subdirectory."""
+        return self.load_json(f"{self.results_dir}/{filename}")
+
+    def get_raw_path(self) -> Path:
+        """Get path to raw/ subdirectory."""
+        return self.base_path / self.raw_dir
+
+    def get_processed_path(self) -> Path:
+        """Get path to processed/ subdirectory."""
+        return self.base_path / self.processed_dir
+
+    def get_models_path(self) -> Path:
+        """Get path to models/ subdirectory."""
+        return self.base_path / self.models_dir
+
+    def get_results_path(self) -> Path:
+        """Get path to results/ subdirectory."""
+        return self.base_path / self.results_dir
+
+    def setup_directories(self) -> None:
+        """Create all organized subdirectories."""
+        self.ensure_directory(self.raw_dir)
+        self.ensure_directory(self.processed_dir)
+        self.ensure_directory(self.models_dir)
+        self.ensure_directory(self.results_dir)
