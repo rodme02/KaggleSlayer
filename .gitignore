@@ -27,10 +27,12 @@ ENV/
 .claude/
 
 # Data files
-competition_data/
+#competition_data/
 *.csv
 *.tsv
 *.parquet
+
+competition_data/digit-recognizer/
 
 # Logs and results
 *.log
