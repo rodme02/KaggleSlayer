@@ -209,15 +209,30 @@ class EnsembleBuilder:
         )
 
     def select_best_models(self, model_results: List[Tuple[str, Any, float]],
-                         top_n: int = 3, min_score_threshold: Optional[float] = None) -> List[Tuple[str, Any]]:
+                         top_n: int = 3, min_score_threshold: Optional[float] = None,
+                         problem_type: str = "classification") -> List[Tuple[str, Any]]:
         """Select the best performing models for ensemble."""
-        # Sort by score (descending for classification, ascending for regression)
-        # Assuming higher scores are better (accuracy, r2) and lower are worse (mse)
-        sorted_results = sorted(model_results, key=lambda x: x[2], reverse=True)
+        # For classification: higher is better (accuracy)
+        # For regression: after negation, scores are positive MSE/MAE, so LOWER is better
+        # CRITICAL: Always sort descending (higher first) because:
+        # - Classification: accuracy (higher = better) ✓
+        # - Regression: -neg_MSE = MSE, but we want LOWER MSE, so we should sort ASCENDING
+        # However, our _cross_validate converts neg_MSE to positive MSE, making higher=worse for regression
+
+        # Determine sort order based on problem type
+        reverse_sort = True  # Default for classification (higher accuracy = better)
+        if problem_type == "regression":
+            reverse_sort = False  # For regression with positive MSE, lower = better
+
+        sorted_results = sorted(model_results, key=lambda x: x[2], reverse=reverse_sort)
 
         # Filter by minimum score threshold if provided
         if min_score_threshold is not None:
-            sorted_results = [r for r in sorted_results if r[2] >= min_score_threshold]
+            if problem_type == "classification":
+                sorted_results = [r for r in sorted_results if r[2] >= min_score_threshold]
+            else:
+                # For regression, we want models BELOW the threshold (lower is better)
+                sorted_results = [r for r in sorted_results if r[2] <= min_score_threshold]
 
         # Select top N models
         selected = sorted_results[:top_n]

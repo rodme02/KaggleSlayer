@@ -53,10 +53,6 @@ class ConfigManager:
         except (KeyError, TypeError):
             return default
 
-    def get_llm_config(self, model_type: str = "primary") -> Dict[str, Any]:
-        """Get LLM configuration for specified model type."""
-        return self.get(f"llm.models.{model_type}", {})
-
     def get_pipeline_config(self) -> Dict[str, Any]:
         """Get pipeline configuration."""
         return self.get("pipeline", {})
@@ -68,17 +64,6 @@ class ConfigManager:
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration if file is not available."""
         return {
-            "llm": {
-                "models": {
-                    "primary": {
-                        "name": "x-ai/grok-4-fast:free",
-                        "max_tokens": 2000,
-                        "temperature": 0.7
-                    }
-                },
-                "timeout": 60,
-                "max_retries": 3
-            },
             "pipeline": {
                 "cv_folds": 5,
                 "cv_random_state": 42,

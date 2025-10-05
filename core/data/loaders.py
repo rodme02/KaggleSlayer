@@ -11,7 +11,23 @@ from dataclasses import dataclass
 
 @dataclass
 class DatasetInfo:
-    """Information about a loaded dataset."""
+    """Information about a loaded dataset.
+
+    Attributes:
+        competition_name: Name of the Kaggle competition
+        total_rows: Total number of rows (train + test)
+        total_columns: Total number of columns
+        train_rows: Number of training examples
+        test_rows: Number of test examples
+        feature_types: Dictionary mapping column names to detected types
+        missing_values: Dictionary mapping column names to missing value counts
+        missing_percentages: Dictionary mapping column names to missing percentages
+        target_column: Name of the target/label column
+        target_type: Data type of the target column
+        duplicates_count: Number of duplicate rows in training data
+        memory_usage_mb: Memory usage in megabytes
+        analysis_timestamp: ISO timestamp of when analysis was performed
+    """
     competition_name: str
     total_rows: int
     total_columns: int
@@ -28,13 +44,36 @@ class DatasetInfo:
 
 
 class DataLoader:
-    """Base class for loading datasets."""
+    """Base class for loading datasets.
+
+    Provides common CSV loading functionality with error handling.
+
+    Attributes:
+        data_path: Base path for data files
+    """
 
     def __init__(self, data_path: Path):
+        """Initialize the data loader.
+
+        Args:
+            data_path: Base directory path for data files
+        """
         self.data_path = Path(data_path)
 
     def load_csv(self, filename: str, **kwargs) -> pd.DataFrame:
-        """Load a CSV file with error handling."""
+        """Load a CSV file with error handling.
+
+        Args:
+            filename: Name of CSV file to load (relative to data_path)
+            **kwargs: Additional arguments to pass to pd.read_csv()
+
+        Returns:
+            Loaded DataFrame
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If file cannot be parsed
+        """
         file_path = self.data_path / filename
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
@@ -46,16 +85,35 @@ class DataLoader:
 
 
 class CompetitionDataLoader(DataLoader):
-    """Specialized loader for Kaggle competition data."""
+    """Specialized loader for Kaggle competition data.
+
+    Loads train/test datasets and provides utilities for analyzing
+    competition-specific data characteristics.
+
+    Attributes:
+        competition_name: Name of the competition (from directory name)
+    """
 
     def __init__(self, competition_path: Path):
+        """Initialize competition data loader.
+
+        Args:
+            competition_path: Path to competition directory
+        """
         super().__init__(competition_path)
         self.competition_name = competition_path.name
 
     def load_competition_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         """Load train and test datasets from competition directory.
 
-        Looks for data in both root directory and raw/ subdirectory.
+        Searches for train.csv and test.csv in both root directory and
+        raw/ subdirectory (raw/ is preferred).
+
+        Returns:
+            Tuple of (train_df, test_df). test_df may be None if not found.
+
+        Raises:
+            FileNotFoundError: If train.csv cannot be found
         """
         print(f"Loading data for competition: {self.competition_name}")
 
@@ -93,7 +151,17 @@ class CompetitionDataLoader(DataLoader):
         return train_df, test_df
 
     def detect_target_column(self, train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] = None) -> Optional[str]:
-        """Attempt to detect the target column."""
+        """Detect the target column by comparing train and test columns.
+
+        The target column is typically present in train but not in test.
+
+        Args:
+            train_df: Training DataFrame
+            test_df: Optional test DataFrame
+
+        Returns:
+            Name of detected target column, or None if cannot detect
+        """
         # Check if target column is not in test set
         if test_df is not None:
             train_cols = set(train_df.columns)
@@ -106,7 +174,26 @@ class CompetitionDataLoader(DataLoader):
         return None
 
     def analyze_feature_types(self, df: pd.DataFrame) -> Dict[str, str]:
-        """Analyze and categorize feature types with improved detection."""
+        """Analyze and categorize feature types with intelligent detection.
+
+        Detects various feature types including:
+        - identifier: ID columns (high uniqueness, ID-like names)
+        - numerical: Continuous numeric features
+        - categorical_numeric: Numeric but with low cardinality
+        - ordinal: Sequential integers with low cardinality
+        - binary: Two-valued features
+        - categorical: Categorical text features
+        - high_cardinality_text: Unique text (descriptions, names)
+        - text: Medium-cardinality text features
+        - datetime: Date/time columns
+        - date_string: Date strings that can be parsed
+
+        Args:
+            df: DataFrame to analyze
+
+        Returns:
+            Dictionary mapping column names to detected feature types
+        """
         feature_types = {}
 
         for col in df.columns:
@@ -166,7 +253,17 @@ class CompetitionDataLoader(DataLoader):
         return feature_types
 
     def _is_identifier_column(self, col_name: str, series: pd.Series) -> bool:
-        """Detect if a column is an identifier (ID, index, etc.)."""
+        """Detect if a column is an identifier (ID, index, etc.).
+
+        Checks both name patterns and uniqueness ratio.
+
+        Args:
+            col_name: Name of the column
+            series: Series data
+
+        Returns:
+            True if column appears to be an identifier
+        """
         # Name-based detection
         id_keywords = ['id', 'ID', 'Id', 'index', 'key', 'passenger', 'customer', 'user', 'order']
         if any(keyword.lower() in col_name.lower() for keyword in id_keywords):
@@ -176,7 +273,14 @@ class CompetitionDataLoader(DataLoader):
         return False
 
     def _is_sequential(self, series: pd.Series) -> bool:
-        """Check if numeric values are sequential (1,2,3,4,5...)."""
+        """Check if numeric values are sequential (1,2,3,4,5...).
+
+        Args:
+            series: Numeric series to check
+
+        Returns:
+            True if values are sequential integers
+        """
         unique_vals = sorted(series.dropna().unique())
         if len(unique_vals) < 2:
             return False
@@ -185,7 +289,16 @@ class CompetitionDataLoader(DataLoader):
         return np.all(diffs == 1) or np.all(diffs == -1)
 
     def _is_date_string(self, series: pd.Series) -> bool:
-        """Detect if object column contains date strings."""
+        """Detect if object column contains date strings.
+
+        Samples first 100 non-null values and attempts to parse as dates.
+
+        Args:
+            series: Series to check for date strings
+
+        Returns:
+            True if >50% of sample values are parseable as dates
+        """
         if len(series) == 0:
             return False
 

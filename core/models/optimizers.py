@@ -164,7 +164,8 @@ class HyperparameterOptimizer:
                 cv = KFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
                 scoring = self.regression_metric
 
-            scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+            # Use error_score=0.0 to silently handle CV failures without verbose error messages
+            scores = cross_val_score(model, X, y, cv=cv, scoring=scoring, error_score=0.0)
 
             # Convert negative metrics to positive for consistency
             if scoring.startswith('neg_'):

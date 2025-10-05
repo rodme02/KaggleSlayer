@@ -49,6 +49,24 @@ class DataScoutAgent(BaseAgent):
                          f"{len([k for k,v in feature_types.items() if v == 'categorical'])} categorical, "
                          f"{len([k for k,v in feature_types.items() if v == 'numerical'])} numerical")
 
+            # Remove ID columns BEFORE any other processing to prevent them from leaking into features
+            id_columns = [k for k, v in feature_types.items() if v == 'identifier']
+            test_id_column = None
+            test_id_values = None
+
+            if id_columns:
+                self.log_info(f"Removing {len(id_columns)} ID columns: {id_columns}")
+                train_df = train_df.drop(columns=id_columns, errors='ignore')
+                if test_df is not None:
+                    # Save the first ID column from test for later (needed for submission)
+                    for id_col in id_columns:
+                        if id_col in test_df.columns:
+                            test_id_column = id_col
+                            test_id_values = test_df[id_col].copy()
+                            break
+                    # Drop all ID columns from test for processing
+                    test_df = test_df.drop(columns=id_columns, errors='ignore')
+
             # Clean data
             if not validation_result.is_valid:
                 self.log_warning(f"Data validation issues found: {validation_result.issues}")
@@ -121,6 +139,9 @@ class DataScoutAgent(BaseAgent):
             if save_cleaned_data:
                 self.file_manager.save_processed_data(train_cleaned, "train_cleaned.csv")
                 if test_cleaned is not None:
+                    # Add back the ID column to test data if it was saved
+                    if test_id_column is not None and test_id_values is not None:
+                        test_cleaned.insert(0, test_id_column, test_id_values)
                     self.file_manager.save_processed_data(test_cleaned, "test_cleaned.csv")
                 self.log_info("Saved cleaned datasets")
 

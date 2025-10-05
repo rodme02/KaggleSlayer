@@ -12,6 +12,7 @@ from scipy.stats import skew
 import warnings
 
 from .utils import detect_id_columns, is_numeric_dtype
+from utils.logging import verbose_print
 
 warnings.filterwarnings('ignore')
 
@@ -51,7 +52,7 @@ class FeatureGenerator:
         if len(numerical_cols) < 2:
             return df_engineered
 
-        print(f"Generating numerical features from {len(numerical_cols)} columns...")
+        verbose_print(f"Generating numerical features from {len(numerical_cols)} columns...")
 
         # Create more meaningful features based on data types and relationships
         feature_count = 0
@@ -130,7 +131,7 @@ class FeatureGenerator:
         if len(numerical_cols) == 0:
             return df_engineered
 
-        print(f"Generating polynomial features (degree {self.polynomial_degree})...")
+        verbose_print(f"Generating polynomial features (degree {self.polynomial_degree})...")
 
         # Adaptive limit based on dataset size and degree
         # Polynomial features grow as C(n+d, d) - limit to prevent explosion
@@ -145,7 +146,7 @@ class FeatureGenerator:
                 numerical_cols = [numerical_cols[i] for i in selected_indices]
             else:
                 numerical_cols = numerical_cols[:max_poly_cols]
-            print(f"Limited to {len(numerical_cols)} columns for polynomial features")
+            verbose_print(f"Limited to {len(numerical_cols)} columns for polynomial features")
 
         poly = PolynomialFeatures(degree=self.polynomial_degree, include_bias=False)
         poly_features = poly.fit_transform(df[numerical_cols])
@@ -180,7 +181,9 @@ class FeatureGenerator:
         if len(categorical_cols) == 0:
             return df_engineered
 
-        print(f"Generating categorical features from {len(categorical_cols)} columns...")
+        if not hasattr(self, '_logged_categorical'):
+            verbose_print(f"Generating categorical features from {len(categorical_cols)} columns...")
+            self._logged_categorical = True
 
         for col in categorical_cols:
             # Only create frequency features for columns with reasonable cardinality
@@ -234,7 +237,7 @@ class FeatureGenerator:
         high_cardinality_cols = [col for col in categorical_cols
                                  if df[col].nunique() > len(df) * 0.1]
         if high_cardinality_cols:
-            print(f"Dropping {len(high_cardinality_cols)} high-cardinality text columns after feature extraction...")
+            verbose_print(f"Dropping {len(high_cardinality_cols)} high-cardinality text columns after feature extraction...")
             df_engineered = df_engineered.drop(columns=high_cardinality_cols, errors='ignore')
 
         return df_engineered
@@ -323,7 +326,7 @@ class FeatureGenerator:
         if len(datetime_cols) == 0:
             return df_engineered
 
-        print(f"Generating datetime features from {len(datetime_cols)} columns...")
+        verbose_print(f"Generating datetime features from {len(datetime_cols)} columns...")
 
         for col in datetime_cols:
             # Convert to datetime if not already
@@ -360,10 +363,10 @@ class FeatureGenerator:
 
         # Only create statistical features if we have enough columns
         if len(numerical_cols) < 3:
-            print(f"Skipping statistical features (need 3+ numerical columns, have {len(numerical_cols)})")
+            verbose_print(f"Skipping statistical features (need 3+ numerical columns, have {len(numerical_cols)})")
             return df_engineered
 
-        print(f"Generating statistical features from {len(numerical_cols)} columns...")
+        verbose_print(f"Generating statistical features from {len(numerical_cols)} columns...")
 
         # Row-wise statistics - only meaningful with multiple features
         df_engineered['row_sum'] = df[numerical_cols].sum(axis=1)
@@ -404,7 +407,7 @@ class FeatureGenerator:
         if len(numerical_cols) < 2:
             return df_clustered
 
-        print(f"Generating clustering features with {n_clusters} clusters...")
+        verbose_print(f"Generating clustering features with {n_clusters} clusters...")
 
         # Use a subset of features to prevent overfitting (max 10 features)
         if len(numerical_cols) > 10:
@@ -455,7 +458,7 @@ class FeatureGenerator:
                         df_clustered['cluster_min_dist'] = distances.min(axis=1)
 
         except Exception as e:
-            print(f"Warning: Clustering feature generation failed: {e}")
+            verbose_print(f"Warning: Clustering feature generation failed: {e}")
 
         return df_clustered
 
@@ -484,7 +487,7 @@ class FeatureGenerator:
         if len(numerical_cols) == 0:
             return df_binned
 
-        print(f"Generating binning features ({n_bins} bins) for numerical columns...")
+        verbose_print(f"Generating binning features ({n_bins} bins) for numerical columns...")
 
         # Only bin columns with high variance or skewness (more informative)
         cols_to_bin = []
@@ -517,7 +520,7 @@ class FeatureGenerator:
                         df_binned[f'{col}_binned'] = binner.transform(df[[col]].fillna(df[col].median()))
 
             except Exception as e:
-                print(f"Warning: Binning failed for {col}: {e}")
+                verbose_print(f"Warning: Binning failed for {col}: {e}")
                 continue
 
         return df_binned
@@ -546,7 +549,7 @@ class FeatureGenerator:
         if len(value_cols) == 0:
             return df_ts
 
-        print(f"Generating time-series features for {len(value_cols)} columns...")
+        verbose_print(f"Generating time-series features for {len(value_cols)} columns...")
 
         # Limit to top 5 columns to prevent explosion
         value_cols = value_cols[:5]
@@ -576,7 +579,7 @@ class FeatureGenerator:
                 self._record_feature(f'{col}_pct_change', f"Percent change of {col}")
 
             except Exception as e:
-                print(f"Warning: Time-series feature generation failed for {col}: {e}")
+                verbose_print(f"Warning: Time-series feature generation failed for {col}: {e}")
                 continue
 
         return df_ts

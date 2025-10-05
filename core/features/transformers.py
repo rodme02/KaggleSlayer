@@ -1,5 +1,14 @@
 """
 Feature transformation utilities for scaling, encoding, and preprocessing features.
+
+This module provides the FeatureTransformer class which handles:
+- Scaling numerical features (standard, minmax, robust)
+- Encoding categorical features (label, one-hot)
+- Missing value imputation (simple, KNN)
+- Power transformations for normality
+- Interaction feature creation
+
+All transformers support fit/transform pattern for proper train/test separation.
 """
 
 from typing import Dict, List, Any, Optional, Tuple
@@ -10,15 +19,27 @@ from sklearn.preprocessing import (
     OneHotEncoder, OrdinalEncoder, PowerTransformer
 )
 from sklearn.impute import SimpleImputer, KNNImputer
+from utils.logging import verbose_print
 import warnings
 
 warnings.filterwarnings('ignore')
 
 
 class FeatureTransformer:
-    """Transforms features using various scaling and encoding methods."""
+    """Transforms features using various scaling and encoding methods.
+
+    Provides stateful transformation operations that can be fit on training data
+    and applied to test data. All fitted transformers are stored for reuse.
+
+    Attributes:
+        scalers: Dictionary of fitted scaling transformers
+        encoders: Dictionary of fitted encoding transformers
+        imputers: Dictionary of fitted imputation transformers
+        transformations_applied: Dictionary tracking which transformations were applied
+    """
 
     def __init__(self):
+        """Initialize the feature transformer."""
         self.scalers = {}
         self.encoders = {}
         self.imputers = {}
@@ -34,7 +55,7 @@ class FeatureTransformer:
         if len(numerical_cols) == 0:
             return df_transformed
 
-        print(f"Scaling numerical features using {method} scaling...")
+        verbose_print(f"Scaling numerical features using {method} scaling...")
 
         # Choose scaler
         if method == "standard":
@@ -72,7 +93,7 @@ class FeatureTransformer:
         if len(categorical_cols) == 0:
             return df_transformed
 
-        print(f"Encoding categorical features using {method} encoding...")
+        verbose_print(f"Encoding categorical features using {method} encoding...")
 
         if method == "label":
             if fit:
@@ -137,7 +158,7 @@ class FeatureTransformer:
         if len(cols_with_missing) == 0:
             return df_imputed
 
-        print(f"Imputing missing values using {method} method...")
+        verbose_print(f"Imputing missing values using {method} method...")
 
         numerical_cols = df[feature_cols].select_dtypes(include=[np.number]).columns
         categorical_cols = df[feature_cols].select_dtypes(include=['object']).columns
@@ -203,7 +224,7 @@ class FeatureTransformer:
         if len(numerical_cols) == 0:
             return df_transformed
 
-        print(f"Applying {method} power transformation...")
+        verbose_print(f"Applying {method} power transformation...")
 
         try:
             if fit:
@@ -232,7 +253,7 @@ class FeatureTransformer:
         if len(numerical_cols) < 2:
             return df_interactions
 
-        print(f"Creating up to {max_interactions} interaction features...")
+        verbose_print(f"Creating up to {max_interactions} interaction features...")
 
         interaction_count = 0
         created_features = []
@@ -252,7 +273,7 @@ class FeatureTransformer:
                 interaction_count += 1
 
         self.transformations_applied['interactions'] = created_features
-        print(f"Created {len(created_features)} interaction features")
+        verbose_print(f"Created {len(created_features)} interaction features")
 
         return df_interactions
 

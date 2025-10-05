@@ -1,5 +1,16 @@
 """
 Feature selection utilities for choosing the most relevant features.
+
+This module provides the FeatureSelector class which offers multiple
+feature selection strategies:
+- Variance-based filtering (remove low-variance features)
+- Correlation-based filtering (remove highly correlated features)
+- Univariate statistical tests (f_classif, f_regression)
+- Model-based selection (Random Forest importance)
+- Recursive feature elimination (RFE)
+- Distribution stability checking (train/test consistency)
+
+All methods support both classification and regression tasks.
 """
 
 from typing import List, Dict, Any, Optional, Tuple
@@ -11,15 +22,37 @@ from sklearn.feature_selection import (
 )
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LassoCV, LogisticRegression
+from utils.logging import verbose_print
 import warnings
 
 warnings.filterwarnings('ignore')
 
 
 class FeatureSelector:
-    """Selects the most relevant features using various methods."""
+    """Selects the most relevant features using various methods.
+
+    Provides multiple feature selection strategies with configurable thresholds.
+    Maintains state about selected features and their scores for analysis.
+
+    Attributes:
+        correlation_threshold: Maximum correlation allowed between features (default 0.95)
+        variance_threshold: Minimum variance required for features (default 0.01)
+        selected_features: List of selected feature names
+        feature_scores: Dictionary mapping features to their importance scores
+        selection_methods: Dictionary tracking which method selected each feature
+        variance_selector: Fitted VarianceThreshold selector
+        selected_feature_names: Cached list of selected feature names
+        distribution_stats: Statistics about train/test distribution differences
+        unstable_features: Features removed due to unstable distributions
+    """
 
     def __init__(self, correlation_threshold: float = 0.95, variance_threshold: float = 0.01):
+        """Initialize feature selector with thresholds.
+
+        Args:
+            correlation_threshold: Max correlation for feature pairs (0-1)
+            variance_threshold: Min variance required for features
+        """
         self.correlation_threshold = correlation_threshold
         self.variance_threshold = variance_threshold
         self.selected_features = []
@@ -38,7 +71,7 @@ class FeatureSelector:
             return df
 
         if fit:
-            print("Removing low variance features...")
+            verbose_print("Removing low variance features...")
 
         numerical_cols = df[feature_cols].select_dtypes(include=[np.number]).columns
 
@@ -58,7 +91,7 @@ class FeatureSelector:
 
             removed_count = len(numerical_cols) - len(selected_numerical_cols)
             if removed_count > 0:
-                print(f"Removed {removed_count} low variance features")
+                verbose_print(f"Removed {removed_count} low variance features")
         else:
             # Use fitted selector
             if self.variance_selector is None or self.selected_feature_names is None:
@@ -79,7 +112,7 @@ class FeatureSelector:
         if len(numerical_cols) < 2:
             return df
 
-        print("Removing highly correlated features...")
+        verbose_print("Removing highly correlated features...")
 
         # Calculate correlation matrix
         corr_matrix = df[numerical_cols].corr().abs()
@@ -97,7 +130,7 @@ class FeatureSelector:
         columns_to_keep = [col for col in df.columns if col not in to_drop]
 
         if len(to_drop) > 0:
-            print(f"Removed {len(to_drop)} highly correlated features")
+            verbose_print(f"Removed {len(to_drop)} highly correlated features")
 
         return df[columns_to_keep]
 
@@ -118,7 +151,7 @@ class FeatureSelector:
         if len(numerical_feature_cols) == 0:
             return df
 
-        print(f"Selecting top {k} features using univariate tests...")
+        verbose_print(f"Selecting top {k} features using univariate tests...")
 
         # Determine problem type
         if problem_type == "auto":
@@ -150,11 +183,11 @@ class FeatureSelector:
             non_numerical_cols = [col for col in feature_cols if col not in numerical_feature_cols]
             final_columns = list(selected_feature_names) + non_numerical_cols + [target_col]
 
-            print(f"Selected {len(selected_feature_names)} numerical features")
+            verbose_print(f"Selected {len(selected_feature_names)} numerical features")
             return df[final_columns]
 
         except Exception as e:
-            print(f"Error in univariate selection: {e}")
+            verbose_print(f"Error in univariate selection: {e}")
             return df
 
     def select_model_based_features(self, df: pd.DataFrame, target_col: str,
@@ -174,7 +207,7 @@ class FeatureSelector:
         if len(numerical_feature_cols) == 0:
             return df
 
-        print(f"Selecting top {max_features} features using model importance...")
+        verbose_print(f"Selecting top {max_features} features using model importance...")
 
         # Determine problem type
         if problem_type == "auto":
@@ -210,11 +243,11 @@ class FeatureSelector:
             non_numerical_cols = [col for col in feature_cols if col not in numerical_feature_cols]
             final_columns = selected_features + non_numerical_cols + [target_col]
 
-            print(f"Selected {len(selected_features)} features based on model importance")
+            verbose_print(f"Selected {len(selected_features)} features based on model importance")
             return df[final_columns]
 
         except Exception as e:
-            print(f"Error in model-based selection: {e}")
+            verbose_print(f"Error in model-based selection: {e}")
             return df
 
     def select_recursive_features(self, df: pd.DataFrame, target_col: str,
@@ -234,7 +267,7 @@ class FeatureSelector:
         if len(numerical_feature_cols) == 0:
             return df
 
-        print(f"Selecting {n_features} features using recursive elimination...")
+        verbose_print(f"Selecting {n_features} features using recursive elimination...")
 
         # Determine problem type
         if problem_type == "auto":
@@ -267,16 +300,16 @@ class FeatureSelector:
             non_numerical_cols = [col for col in feature_cols if col not in numerical_feature_cols]
             final_columns = list(selected_features) + non_numerical_cols + [target_col]
 
-            print(f"Selected {len(selected_features)} features using RFE")
+            verbose_print(f"Selected {len(selected_features)} features using RFE")
             return df[final_columns]
 
         except Exception as e:
-            print(f"Error in recursive feature elimination: {e}")
+            verbose_print(f"Error in recursive feature elimination: {e}")
             return df
 
     def check_distribution_stability(self, train_df: pd.DataFrame, test_df: pd.DataFrame,
                                     target_col: Optional[str] = None,
-                                    mean_threshold: float = 0.5, std_ratio_threshold: float = 2.0) -> pd.DataFrame:
+                                    mean_threshold: float = 0.5, std_ratio_threshold: float = 2.0) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         Remove features with unstable distributions between train and test sets.
 
@@ -288,15 +321,15 @@ class FeatureSelector:
             std_ratio_threshold: Maximum ratio of std deviations allowed
 
         Returns:
-            train_df with only stable features
+            Tuple of (train_df, test_df) with only stable features
         """
         feature_cols = [col for col in train_df.columns if col != target_col]
         numerical_cols = train_df[feature_cols].select_dtypes(include=[np.number]).columns
 
         if len(numerical_cols) == 0:
-            return train_df
+            return train_df, test_df
 
-        print("Checking train/test distribution stability...")
+        verbose_print("Checking train/test distribution stability...")
 
         stable_features = []
         self.unstable_features = []
@@ -348,7 +381,7 @@ class FeatureSelector:
                 stable_features.append(col)
             else:
                 self.unstable_features.append(col)
-                print(f"  Removing {col}: norm_mean_diff={normalized_mean_diff:.2f}, std_ratio={std_ratio:.2f}")
+                verbose_print(f"  Removing {col}: norm_mean_diff={normalized_mean_diff:.2f}, std_ratio={std_ratio:.2f}")
 
         # Combine stable features with non-numerical features and target
         non_numerical_cols = [col for col in feature_cols if col not in numerical_cols]
@@ -356,10 +389,13 @@ class FeatureSelector:
         if target_col and target_col in train_df.columns:
             final_columns.append(target_col)
 
-        if len(self.unstable_features) > 0:
-            print(f"Removed {len(self.unstable_features)} unstable features")
+        # Prepare test columns (exclude target, only keep columns that exist in test)
+        test_final_columns = [col for col in final_columns if col != target_col and col in test_df.columns]
 
-        return train_df[final_columns]
+        if len(self.unstable_features) > 0:
+            verbose_print(f"Removed {len(self.unstable_features)} unstable features")
+
+        return train_df[final_columns], test_df[test_final_columns]
 
     def get_selection_report(self) -> Dict[str, Any]:
         """Get a report of feature selection results."""

@@ -15,10 +15,30 @@ from utils.kaggle_api import KaggleAPIClient
 
 
 class PipelineCoordinator(BaseAgent):
-    """Coordinates the entire KaggleSlayer pipeline execution."""
+    """Coordinates the entire KaggleSlayer pipeline execution.
+
+    Orchestrates all pipeline stages in sequence:
+    1. Data Scout: Data exploration, cleaning, and initial analysis
+    2. Feature Engineer: Feature generation, selection, and transformation
+    3. Model Selector: Model training, evaluation, and selection
+    4. Submission: Create and optionally submit predictions to Kaggle
+
+    Attributes:
+        data_scout: Agent for data exploration and cleaning
+        feature_engineer: Agent for feature engineering
+        model_selector: Agent for model training and selection
+        kaggle_client: Client for Kaggle API interactions
+    """
 
     def __init__(self, competition_name: str, competition_path: Path,
                  config: Optional[ConfigManager] = None):
+        """Initialize the pipeline coordinator.
+
+        Args:
+            competition_name: Name of the Kaggle competition
+            competition_path: Path to competition data directory
+            config: Optional configuration manager
+        """
         super().__init__(competition_name, competition_path, config)
 
         # Initialize agents
@@ -30,7 +50,26 @@ class PipelineCoordinator(BaseAgent):
         self.kaggle_client = KaggleAPIClient()
 
     def run(self, submit_to_kaggle: bool = False) -> Dict[str, Any]:
-        """Run the complete pipeline."""
+        """Run the complete pipeline from data loading to submission.
+
+        Executes all pipeline stages in sequence and provides comprehensive
+        progress updates and final summary.
+
+        Args:
+            submit_to_kaggle: Whether to submit results to Kaggle after completion
+
+        Returns:
+            Dictionary containing:
+                - competition_name: Competition identifier
+                - pipeline_status: 'completed' or 'failed'
+                - steps_completed: List of completed stage names
+                - results: Results from each pipeline stage
+                - best_model: Name of the best performing model
+                - final_score: Cross-validation score of best model
+
+        Raises:
+            Exception: Any error that occurs during pipeline execution
+        """
         pipeline_results = {
             'competition_name': self.competition_name,
             'pipeline_status': 'running',
@@ -75,7 +114,9 @@ class PipelineCoordinator(BaseAgent):
             print("="*70)
             self.log_info("Training multiple models and finding the best...")
             step_start = time.time()
-            model_results = self.model_selector.run()
+            # Disable hyperparameter optimization by default to keep output clean
+            # (can be enabled by modifying this line)
+            model_results = self.model_selector.run(optimize_hyperparameters=False)
             pipeline_results['results']['model_selector'] = model_results
             pipeline_results['steps_completed'].append('model_selector')
             print(f"[OK] Model Selection completed in {time.time() - step_start:.1f}s")
@@ -129,7 +170,22 @@ class PipelineCoordinator(BaseAgent):
             raise
 
     def create_submission(self) -> Optional[pd.DataFrame]:
-        """Create submission file: ID column from test.csv + predictions as target column."""
+        """Create submission file with predictions for test data.
+
+        Generates predictions using the trained pipeline (feature engineering + model)
+        and formats them according to Kaggle submission requirements.
+
+        Process:
+        1. Load data scout results to get target column name
+        2. Look for sample_submission.csv template
+        3. Load cleaned test data from processed directory
+        4. Load trained model pipeline
+        5. Generate predictions
+        6. Format and save submission.csv
+
+        Returns:
+            DataFrame with submission (ID column + predictions), or None if failed
+        """
         try:
             # Load data scout results
             data_results = self.file_manager.load_results("data_scout_results.json")
@@ -166,23 +222,37 @@ class PipelineCoordinator(BaseAgent):
                 test_df = None  # We'll use sample_submission_df for IDs
                 self.log_info(f"Using sample submission template with columns: {list(sample_submission_df.columns)}")
 
-            # Load engineered test features
-            _, test_engineered = self.feature_engineer.get_engineered_data()
-            if test_engineered is None:
-                self.log_error("No engineered test data available")
+            # Load CLEANED test data from processed directory (ID column already added back)
+            _, test_cleaned = self.file_manager.load_processed_data("train_cleaned.csv"), None
+            if self.file_manager.file_exists(f"{self.file_manager.processed_dir}/test_cleaned.csv"):
+                test_cleaned = self.file_manager.load_processed_data("test_cleaned.csv")
+
+            if test_cleaned is None:
+                self.log_error("No cleaned test data available")
                 return None
 
-            # Prepare features for prediction (exclude target if present)
-            feature_cols = [col for col in test_engineered.columns if col != target_column]
-            test_features = test_engineered[feature_cols]
+            # Store ID column values before dropping
+            if id_column and id_column in test_cleaned.columns:
+                id_values = test_cleaned[id_column].copy()
+                test_features = test_cleaned.drop(columns=[id_column])
+            else:
+                id_values = None
+                test_features = test_cleaned
 
-            # Generate predictions using best model
+            # Get model results
             model_results = self.file_manager.load_results("model_selector_results.json")
             if not model_results or 'best_model_name' not in model_results:
                 self.log_error("No model results found")
                 return None
 
-            predictions = self.model_selector.predict_with_best_model(test_features)
+            # Load the saved pipeline (includes feature engineering + model)
+            import joblib
+            model_path = self.file_manager.get_file_path("best_model.pkl")
+            trained_pipeline = joblib.load(model_path)
+
+            # Generate predictions using the full pipeline
+            # The pipeline will handle feature engineering internally
+            predictions = trained_pipeline.predict(test_features)
             self.log_info(f"Generated {len(predictions)} predictions using {model_results['best_model_name']}")
 
             # Format predictions for classification
@@ -199,13 +269,17 @@ class PipelineCoordinator(BaseAgent):
                 submission_df = sample_submission_df.copy()
                 submission_df.iloc[:, 1] = predictions  # Replace second column (target) with predictions
             else:
-                # Using test.csv structure
-                if len(predictions) != len(test_df):
-                    self.log_error(f"Prediction count mismatch: {len(predictions)} vs {len(test_df)} expected")
+                # Using test_cleaned structure with stored ID values
+                if id_values is None:
+                    self.log_error("No ID column values available for submission")
+                    return None
+
+                if len(predictions) != len(id_values):
+                    self.log_error(f"Prediction count mismatch: {len(predictions)} vs {len(id_values)} expected")
                     return None
 
                 submission_df = pd.DataFrame({
-                    id_column: test_df[id_column].values,
+                    id_column: id_values.values,
                     target_column: predictions
                 })
 

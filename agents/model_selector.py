@@ -35,17 +35,32 @@ class ModelSelectorAgent(BaseAgent):
             random_state=self.get_config("pipeline.cv_random_state", 42)
         )
 
-    def run(self, optimize_hyperparameters: bool = True, create_ensemble: bool = True) -> Dict[str, Any]:
-        """Run the complete model selection and training process."""
+    def run(self, optimize_hyperparameters: bool = True, create_ensemble: bool = True,
+            use_feature_pipeline: bool = True) -> Dict[str, Any]:
+        """Run the complete model selection and training process.
+
+        Args:
+            optimize_hyperparameters: Whether to optimize hyperparameters
+            create_ensemble: Whether to create ensemble models
+            use_feature_pipeline: If True, uses CLEANED data + feature pipeline (leak-free CV).
+                                 If False, uses pre-engineered data (backward compatibility).
+        """
         self.log_info("Starting model selection process...")
 
         try:
-            # Load engineered data
-            train_df, _ = self._load_engineered_data()
-
-            # Get target column
-            feature_results = self.load_results("feature_engineer_results.json")
-            target_column = feature_results.get('target_column')
+            # CRITICAL: Load CLEANED data (not engineered) to prevent leakage
+            if use_feature_pipeline:
+                self.log_info("Using leak-free CV: Feature engineering will happen inside each fold")
+                train_df, _ = self._load_cleaned_data()
+                # Get target column from data scout results
+                data_results = self.load_results("data_scout_results.json")
+                target_column = data_results.get('dataset_info', {}).get('target_column')
+            else:
+                self.log_warning("Using pre-engineered data (may have leakage)")
+                train_df, _ = self._load_engineered_data()
+                # Get target column from feature engineer results
+                feature_results = self.load_results("feature_engineer_results.json")
+                target_column = feature_results.get('target_column')
 
             if not target_column or target_column not in train_df.columns:
                 self.log_error("Target column not found")
@@ -85,40 +100,76 @@ class ModelSelectorAgent(BaseAgent):
             problem_type = "classification" if y.nunique() < 20 else "regression"
             self.log_info(f"Detected problem type: {problem_type}")
 
+            # Create feature pipeline if using leak-free CV
+            if use_feature_pipeline:
+                from .feature_engineer import FeatureEngineerAgent
+                feature_engineer = FeatureEngineerAgent(
+                    self.competition_name,
+                    self.competition_path,
+                    self.config
+                )
+                feature_pipeline = feature_engineer.create_feature_pipeline()
+                self.log_info("Using leak-free CV (feature engineering inside each fold)")
+            else:
+                feature_pipeline = None
+
             # Get available models
             available_models = self.model_factory.get_available_model_names(problem_type)
             self.log_info(f"Available models: {available_models}")
 
-            # Evaluate models
+            # Evaluate models with clean output
             model_results = []
-            #for model_name in available_models[:5]:  # Limit to top 5 for speed
-            for model_name in available_models:
+            print()  # Empty line for readability
+            for i, model_name in enumerate(available_models, 1):
                 try:
-                    self.log_info(f"Evaluating {model_name}...")
+                    # Show progress
+                    print(f"  [{i}/{len(available_models)}] Evaluating {model_name}...", end=' ', flush=True)
 
                     # Create model with default parameters
                     model = self.model_factory.create_model(model_name, problem_type=problem_type)
 
-                    # Evaluate model
-                    eval_result = self.evaluator.evaluate_model(
-                        model, X, y, problem_type=problem_type, model_name=model_name
-                    )
+                    # CRITICAL: If using feature pipeline, wrap model in a full pipeline
+                    if feature_pipeline is not None:
+                        from sklearn.pipeline import Pipeline
+                        full_pipeline = Pipeline([
+                            ('features', feature_pipeline),
+                            ('model', model)
+                        ])
+                    else:
+                        full_pipeline = model
 
-                    model_results.append((model_name, model, eval_result.cv_mean))
-                    self.log_info(f"{model_name} CV score: {eval_result.cv_mean:.4f}")
+                    # Evaluate with suppressed feature engineering logs during CV
+                    if use_feature_pipeline:
+                        from utils.logging import suppress_feature_logs
+                        with suppress_feature_logs():
+                            eval_result = self.evaluator.evaluate_model(
+                                full_pipeline, X, y, problem_type=problem_type, model_name=model_name
+                            )
+                    else:
+                        eval_result = self.evaluator.evaluate_model(
+                            full_pipeline, X, y, problem_type=problem_type, model_name=model_name
+                        )
+
+                    model_results.append((model_name, full_pipeline, eval_result.cv_mean))
+                    print(f"CV: {eval_result.cv_mean:.4f}")
 
                 except Exception as e:
-                    self.log_warning(f"Failed to evaluate {model_name}: {e}")
+                    print(f"FAILED")
+                    self.log_warning(f"  Error: {e}")
                     continue
 
             if not model_results:
                 raise ValueError("No models could be evaluated successfully")
 
-            # Select best models
-            best_models = self.ensemble_builder.select_best_models(model_results, top_n=3)
+            # Select best models FOR REFERENCE (these are fitted pipelines, not for ensemble)
+            best_model_results = self.ensemble_builder.select_best_models(model_results, top_n=3, problem_type=problem_type)
 
             # Optimize hyperparameters for best model
-            best_model_name, best_model, best_score = max(model_results, key=lambda x: x[2])
+            # For classification: higher is better, for regression: lower is better
+            if problem_type == "classification":
+                best_model_name, best_model, best_score = max(model_results, key=lambda x: x[2])
+            else:
+                best_model_name, best_model, best_score = min(model_results, key=lambda x: x[2])
             optimized_params = {}
 
             if optimize_hyperparameters:
@@ -126,50 +177,95 @@ class ModelSelectorAgent(BaseAgent):
                 try:
                     param_space = self.model_factory.get_parameter_space(best_model_name, problem_type)
                     if param_space:
-                        optimization_result = self.optimizer.optimize(
-                            lambda params: self.model_factory.create_model(best_model_name, params, problem_type),
-                            param_space, X, y, problem_type
-                        )
+                        # Suppress CV error tracebacks during optimization
+                        from utils.logging import suppress_sklearn_warnings
+                        with suppress_sklearn_warnings():
+                            optimization_result = self.optimizer.optimize(
+                                lambda params: self.model_factory.create_model(best_model_name, params, problem_type),
+                                param_space, X, y, problem_type
+                            )
                         optimized_params = optimization_result.best_params
                         self.log_info(f"Optimization completed. Best score: {optimization_result.best_score:.4f}")
                 except Exception as e:
                     self.log_warning(f"Hyperparameter optimization failed: {e}")
 
             # Create ensemble - try both stacking and voting, use the best
+            print()  # Empty line
             ensemble_score = None
             ensemble_type = None
             ensemble_model = None
-            if create_ensemble and len(best_models) > 1:
-                self.log_info("Creating ensembles...")
-                try:
-                    # Try stacking ensemble
-                    stacking_result = self.ensemble_builder.create_stacking_ensemble(
-                        best_models, X, y, problem_type
-                    )
-                    stacking_score = stacking_result.ensemble_score
-                    self.log_info(f"Stacking ensemble score: {stacking_score:.4f}")
 
-                    # Try voting ensemble
-                    voting_result = self.ensemble_builder.create_voting_ensemble(
-                        best_models, X, y, problem_type
-                    )
-                    voting_score = voting_result.ensemble_score
-                    self.log_info(f"Voting ensemble score: {voting_score:.4f}")
+            if use_feature_pipeline and create_ensemble and len(best_model_results) > 1:
+                print("  Ensemble disabled (using best single model with leak-free CV)")
+            elif create_ensemble and len(best_model_results) > 1:
+                print("  Creating ensembles...", end=' ', flush=True)
+                try:
+                    # Create FRESH unfitted pipelines for each best model
+                    if use_feature_pipeline:
+                        from sklearn.pipeline import Pipeline
+                        from .feature_engineer import FeatureEngineerAgent
+
+                        # Get list of best model names
+                        best_model_names = [name for name, _ in best_model_results]
+
+                        # Create fresh pipelines for ensemble
+                        ensemble_base_models = []
+                        for model_name in best_model_names:
+                            # Create fresh feature pipeline
+                            feature_engineer = FeatureEngineerAgent(
+                                self.competition_name,
+                                self.competition_path,
+                                self.config
+                            )
+                            fresh_feature_pipeline = feature_engineer.create_feature_pipeline()
+
+                            # Create fresh model
+                            fresh_model = self.model_factory.create_model(model_name, problem_type=problem_type)
+
+                            # Combine into pipeline
+                            fresh_pipeline = Pipeline([
+                                ('features', fresh_feature_pipeline),
+                                ('model', fresh_model)
+                            ])
+                            ensemble_base_models.append((model_name, fresh_pipeline))
+                    else:
+                        # For non-pipeline case, create fresh models
+                        best_model_names = [name for name, _ in best_model_results]
+                        ensemble_base_models = [
+                            (name, self.model_factory.create_model(name, problem_type=problem_type))
+                            for name in best_model_names
+                        ]
+
+                    # Suppress feature engineering logs (but not ensemble logs) during CV
+                    from utils.logging_utils import suppress_feature_logs
+                    with suppress_feature_logs():
+                        # Try stacking ensemble
+                        stacking_result = self.ensemble_builder.create_stacking_ensemble(
+                            ensemble_base_models, X, y, problem_type
+                        )
+                        stacking_score = stacking_result.ensemble_score
+
+                        # Try voting ensemble
+                        voting_result = self.ensemble_builder.create_voting_ensemble(
+                            ensemble_base_models, X, y, problem_type
+                        )
+                        voting_score = voting_result.ensemble_score
 
                     # Use the best ensemble
                     if stacking_score > voting_score:
                         ensemble_score = stacking_score
                         ensemble_type = "stacking"
                         ensemble_model = stacking_result.ensemble_model
-                        self.log_info(f"Using stacking ensemble (better score)")
+                        print(f"Stacking: {stacking_score:.4f} (best)")
                     else:
                         ensemble_score = voting_score
                         ensemble_type = "voting"
                         ensemble_model = voting_result.ensemble_model
-                        self.log_info(f"Using voting ensemble (better score)")
+                        print(f"Voting: {voting_score:.4f} (best)")
 
                 except Exception as e:
-                    self.log_warning(f"Ensemble creation failed: {e}")
+                    print(f"FAILED")
+                    self.log_warning(f"  Error: {e}")
 
             # Decide whether to use ensemble or single model for final predictions
             final_model = best_model
@@ -185,6 +281,12 @@ class ModelSelectorAgent(BaseAgent):
                     self.log_info(f"Using ensemble for predictions (score: {ensemble_score:.4f} > {best_score:.4f})")
                 else:
                     self.log_info(f"Using single model for predictions (score: {best_score:.4f} >= {ensemble_score:.4f})")
+
+            # Fit final model on full training data if using feature pipeline
+            if use_feature_pipeline and final_model is not None:
+                self.log_info("Fitting final pipeline on full training data...")
+                final_model.fit(X, y)
+                self.log_info("Final pipeline fitted successfully")
 
             # Save the final model (ensemble or best single)
             if final_model is not None:
@@ -244,6 +346,24 @@ class ModelSelectorAgent(BaseAgent):
 
         except FileNotFoundError:
             self.log_error("Engineered data not found. Run feature engineer first.")
+            raise
+
+    def _load_cleaned_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+        """Load CLEANED data from data scout (NOT engineered data).
+
+        This is used for leak-free CV where feature engineering happens inside each fold.
+        """
+        try:
+            train_df = self.file_manager.load_processed_data("train_cleaned.csv")
+            test_df = None
+
+            if self.file_manager.file_exists(f"{self.file_manager.processed_dir}/test_cleaned.csv"):
+                test_df = self.file_manager.load_processed_data("test_cleaned.csv")
+
+            return train_df, test_df
+
+        except FileNotFoundError:
+            self.log_error("Cleaned data not found. Run data scout first.")
             raise
 
     def predict_with_best_model(self, X_test: pd.DataFrame) -> List:
