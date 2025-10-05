@@ -1,0 +1,63 @@
+{
+  "competition_name": "playground-series-s5e9",
+  "problem_type": "regression",
+  "target_column": "BeatsPerMinute",
+  "models_evaluated": 10,
+  "best_model_name": "ensemble_voting",
+  "best_model_score": 697.5691433461726,
+  "best_single_model": "lasso",
+  "best_single_score": 697.1607617930331,
+  "optimized_parameters": {
+    "alpha": 0.008539771996977141,
+    "max_iter": 9588
+  },
+  "ensemble_score": 697.5691433461726,
+  "ensemble_type": "voting",
+  "model_comparison": [
+    {
+      "name": "random_forest",
+      "score": 708.3384687563822
+    },
+    {
+      "name": "extra_trees",
+      "score": 706.8813987195514
+    },
+    {
+      "name": "ridge",
+      "score": 699.024751396916
+    },
+    {
+      "name": "lasso",
+      "score": 697.1607617930331
+    },
+    {
+      "name": "elastic_net",
+      "score": 697.2131521203271
+    },
+    {
+      "name": "knn",
+      "score": 810.1914625311576
+    },
+    {
+      "name": "svr",
+      "score": 719.1459939247471
+    },
+    {
+      "name": "xgboost",
+      "score": 789.5366843500731
+    },
+    {
+      "name": "lightgbm",
+      "score": 810.1005067420463
+    },
+    {
+      "name": "catboost",
+      "score": 751.9005487943521
+    }
+  ],
+  "data_shape": [
+    5000,
+    20
+  ],
+  "feature_count": 20
+}

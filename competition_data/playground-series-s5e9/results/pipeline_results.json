@@ -1,0 +1,788 @@
+{
+  "competition_name": "playground-series-s5e9",
+  "pipeline_status": "completed",
+  "steps_completed": [
+    "data_scout",
+    "feature_engineer",
+    "model_selector",
+    "submission",
+    "kaggle_submission"
+  ],
+  "results": {
+    "data_scout": {
+      "competition_name": "playground-series-s5e9",
+      "dataset_info": {
+        "total_rows": 524164,
+        "total_columns": 10,
+        "target_column": "BeatsPerMinute",
+        "feature_types": {
+          "id": "identifier",
+          "RhythmScore": "numerical",
+          "AudioLoudness": "numerical",
+          "VocalContent": "numerical",
+          "AcousticQuality": "numerical",
+          "InstrumentalScore": "numerical",
+          "LivePerformanceLikelihood": "numerical",
+          "MoodScore": "numerical",
+          "TrackDurationMs": "numerical",
+          "Energy": "numerical",
+          "BeatsPerMinute": "numerical"
+        },
+        "missing_values": {
+          "RhythmScore": 0,
+          "AudioLoudness": 0,
+          "VocalContent": 0,
+          "AcousticQuality": 0,
+          "InstrumentalScore": 0,
+          "LivePerformanceLikelihood": 0,
+          "MoodScore": 0,
+          "TrackDurationMs": 0,
+          "Energy": 0,
+          "BeatsPerMinute": 0
+        },
+        "duplicates_removed": 0,
+        "memory_usage_mb": 39.990665435791016
+      },
+      "validation_results": {
+        "train_valid": true,
+        "train_issues": [],
+        "train_warnings": [],
+        "statistics": {
+          "shape": [
+            524164,
+            10
+          ],
+          "memory_usage_mb": 39.990665435791016,
+          "missing_values": {
+            "RhythmScore": 0,
+            "AudioLoudness": 0,
+            "VocalContent": 0,
+            "AcousticQuality": 0,
+            "InstrumentalScore": 0,
+            "LivePerformanceLikelihood": 0,
+            "MoodScore": 0,
+            "TrackDurationMs": 0,
+            "Energy": 0,
+            "BeatsPerMinute": 0
+          },
+          "missing_percentages": {
+            "RhythmScore": 0.0,
+            "AudioLoudness": 0.0,
+            "VocalContent": 0.0,
+            "AcousticQuality": 0.0,
+            "InstrumentalScore": 0.0,
+            "LivePerformanceLikelihood": 0.0,
+            "MoodScore": 0.0,
+            "TrackDurationMs": 0.0,
+            "Energy": 0.0,
+            "BeatsPerMinute": 0.0
+          },
+          "duplicates_count": "0",
+          "numerical_columns": [
+            "RhythmScore",
+            "AudioLoudness",
+            "VocalContent",
+            "AcousticQuality",
+            "InstrumentalScore",
+            "LivePerformanceLikelihood",
+            "MoodScore",
+            "TrackDurationMs",
+            "Energy",
+            "BeatsPerMinute"
+          ],
+          "categorical_columns": []
+        }
+      },
+      "preprocessing_applied": {
+        "missing_values_handled": true,
+        "duplicates_removed": 0,
+        "outliers_detected": 2
+      },
+      "recommendations": {
+        "target_column": "BeatsPerMinute",
+        "problem_type": "regression",
+        "feature_count": 10,
+        "sample_count": 524164
+      }
+    },
+    "feature_engineer": {
+      "competition_name": "playground-series-s5e9",
+      "original_features": 10,
+      "generated_features": 62,
+      "final_features": 21,
+      "target_column": "BeatsPerMinute",
+      "feature_generation_report": {
+        "total_features_created": 62,
+        "features": [
+          "RhythmScore_div_AudioLoudness",
+          "RhythmScore_times_AudioLoudness",
+          "RhythmScore_div_VocalContent",
+          "RhythmScore_times_VocalContent",
+          "RhythmScore_div_AcousticQuality",
+          "RhythmScore_times_AcousticQuality",
+          "RhythmScore_div_InstrumentalScore",
+          "RhythmScore_times_InstrumentalScore",
+          "RhythmScore_div_LivePerformanceLikelihood",
+          "RhythmScore_times_LivePerformanceLikelihood",
+          "RhythmScore_div_MoodScore",
+          "RhythmScore_times_MoodScore",
+          "RhythmScore_div_TrackDurationMs",
+          "RhythmScore_times_TrackDurationMs",
+          "RhythmScore_div_Energy",
+          "RhythmScore_times_Energy",
+          "AudioLoudness_div_VocalContent",
+          "AudioLoudness_times_VocalContent",
+          "AudioLoudness_div_AcousticQuality",
+          "AudioLoudness_times_AcousticQuality",
+          "AudioLoudness_div_InstrumentalScore",
+          "AudioLoudness_times_InstrumentalScore",
+          "AudioLoudness_div_LivePerformanceLikelihood",
+          "AudioLoudness_times_LivePerformanceLikelihood",
+          "AudioLoudness_div_MoodScore",
+          "row_sum",
+          "row_mean",
+          "row_std",
+          "row_min",
+          "row_max",
+          "row_range",
+          "RhythmScore_div_AudioLoudness",
+          "RhythmScore_times_AudioLoudness",
+          "RhythmScore_div_VocalContent",
+          "RhythmScore_times_VocalContent",
+          "RhythmScore_div_AcousticQuality",
+          "RhythmScore_times_AcousticQuality",
+          "RhythmScore_div_InstrumentalScore",
+          "RhythmScore_times_InstrumentalScore",
+          "RhythmScore_div_LivePerformanceLikelihood",
+          "RhythmScore_times_LivePerformanceLikelihood",
+          "RhythmScore_div_MoodScore",
+          "RhythmScore_times_MoodScore",
+          "RhythmScore_div_TrackDurationMs",
+          "RhythmScore_times_TrackDurationMs",
+          "RhythmScore_div_Energy",
+          "RhythmScore_times_Energy",
+          "AudioLoudness_div_VocalContent",
+          "AudioLoudness_times_VocalContent",
+          "AudioLoudness_div_AcousticQuality",
+          "AudioLoudness_times_AcousticQuality",
+          "AudioLoudness_div_InstrumentalScore",
+          "AudioLoudness_times_InstrumentalScore",
+          "AudioLoudness_div_LivePerformanceLikelihood",
+          "AudioLoudness_times_LivePerformanceLikelihood",
+          "AudioLoudness_div_MoodScore",
+          "row_sum",
+          "row_mean",
+          "row_std",
+          "row_min",
+          "row_max",
+          "row_range"
+        ],
+        "creation_methods": {
+          "RhythmScore_div_AudioLoudness": "Ratio of RhythmScore and AudioLoudness",
+          "RhythmScore_times_AudioLoudness": "Product of RhythmScore and AudioLoudness",
+          "RhythmScore_div_VocalContent": "Ratio of RhythmScore and VocalContent",
+          "RhythmScore_times_VocalContent": "Product of RhythmScore and VocalContent",
+          "RhythmScore_div_AcousticQuality": "Ratio of RhythmScore and AcousticQuality",
+          "RhythmScore_times_AcousticQuality": "Product of RhythmScore and AcousticQuality",
+          "RhythmScore_div_InstrumentalScore": "Ratio of RhythmScore and InstrumentalScore",
+          "RhythmScore_times_InstrumentalScore": "Product of RhythmScore and InstrumentalScore",
+          "RhythmScore_div_LivePerformanceLikelihood": "Ratio of RhythmScore and LivePerformanceLikelihood",
+          "RhythmScore_times_LivePerformanceLikelihood": "Product of RhythmScore and LivePerformanceLikelihood",
+          "RhythmScore_div_MoodScore": "Ratio of RhythmScore and MoodScore",
+          "RhythmScore_times_MoodScore": "Product of RhythmScore and MoodScore",
+          "RhythmScore_div_TrackDurationMs": "Ratio of RhythmScore and TrackDurationMs",
+          "RhythmScore_times_TrackDurationMs": "Product of RhythmScore and TrackDurationMs",
+          "RhythmScore_div_Energy": "Ratio of RhythmScore and Energy",
+          "RhythmScore_times_Energy": "Product of RhythmScore and Energy",
+          "AudioLoudness_div_VocalContent": "Ratio of AudioLoudness and VocalContent",
+          "AudioLoudness_times_VocalContent": "Product of AudioLoudness and VocalContent",
+          "AudioLoudness_div_AcousticQuality": "Ratio of AudioLoudness and AcousticQuality",
+          "AudioLoudness_times_AcousticQuality": "Product of AudioLoudness and AcousticQuality",
+          "AudioLoudness_div_InstrumentalScore": "Ratio of AudioLoudness and InstrumentalScore",
+          "AudioLoudness_times_InstrumentalScore": "Product of AudioLoudness and InstrumentalScore",
+          "AudioLoudness_div_LivePerformanceLikelihood": "Ratio of AudioLoudness and LivePerformanceLikelihood",
+          "AudioLoudness_times_LivePerformanceLikelihood": "Product of AudioLoudness and LivePerformanceLikelihood",
+          "AudioLoudness_div_MoodScore": "Ratio of AudioLoudness and MoodScore",
+          "row_sum": "Row-wise sum of numerical features",
+          "row_mean": "Row-wise mean of numerical features",
+          "row_std": "Row-wise std of numerical features",
+          "row_min": "Row-wise min of numerical features",
+          "row_max": "Row-wise max of numerical features",
+          "row_range": "Row-wise range of numerical features"
+        }
+      },
+      "feature_selection_report": {
+        "total_features_evaluated": 28,
+        "selected_features": [],
+        "feature_scores": {
+          "RhythmScore": 15.01581459619255,
+          "AudioLoudness": 5.806768458310675,
+          "AcousticQuality": 0.35213099820945515,
+          "InstrumentalScore": 1.8369457901443913,
+          "LivePerformanceLikelihood": 6.289979193410071,
+          "MoodScore": 26.118708937944074,
+          "TrackDurationMs": 24.121062526543433,
+          "Energy": 10.044628428686735,
+          "RhythmScore_div_AudioLoudness": 0.7267807537739248,
+          "RhythmScore_times_AudioLoudness": 10.56772690301867,
+          "RhythmScore_div_VocalContent": 0.23399713001832634,
+          "RhythmScore_div_AcousticQuality": 5.826312136665461,
+          "RhythmScore_times_AcousticQuality": 0.47506807026405934,
+          "RhythmScore_div_InstrumentalScore": 1.6255773328214331,
+          "RhythmScore_div_LivePerformanceLikelihood": 10.495566650671801,
+          "RhythmScore_div_MoodScore": 1.468766367668348,
+          "RhythmScore_times_MoodScore": 45.45015309647718,
+          "RhythmScore_times_TrackDurationMs": 40.37146030073307,
+          "RhythmScore_times_Energy": 1.4972307998899936,
+          "AudioLoudness_div_VocalContent": 0.5912922476926108,
+          "AudioLoudness_times_VocalContent": 10.438856040917226,
+          "AudioLoudness_div_AcousticQuality": 5.948779677943519,
+          "AudioLoudness_times_AcousticQuality": 3.17067135422661,
+          "AudioLoudness_div_InstrumentalScore": 0.6442951538372208,
+          "AudioLoudness_times_InstrumentalScore": 3.9639316348737843,
+          "AudioLoudness_div_LivePerformanceLikelihood": 7.48709599668836,
+          "AudioLoudness_times_LivePerformanceLikelihood": 11.285923878337096,
+          "AudioLoudness_div_MoodScore": 0.04524542362621276
+        },
+        "selection_methods": {
+          "RhythmScore": "univariate",
+          "AudioLoudness": "univariate",
+          "InstrumentalScore": "univariate",
+          "LivePerformanceLikelihood": "univariate",
+          "MoodScore": "univariate",
+          "TrackDurationMs": "univariate",
+          "Energy": "univariate",
+          "RhythmScore_times_AudioLoudness": "univariate",
+          "RhythmScore_div_AcousticQuality": "univariate",
+          "RhythmScore_div_InstrumentalScore": "univariate",
+          "RhythmScore_div_LivePerformanceLikelihood": "univariate",
+          "RhythmScore_times_MoodScore": "univariate",
+          "RhythmScore_times_TrackDurationMs": "univariate",
+          "RhythmScore_times_Energy": "univariate",
+          "AudioLoudness_times_VocalContent": "univariate",
+          "AudioLoudness_div_AcousticQuality": "univariate",
+          "AudioLoudness_times_AcousticQuality": "univariate",
+          "AudioLoudness_times_InstrumentalScore": "univariate",
+          "AudioLoudness_div_LivePerformanceLikelihood": "univariate",
+          "AudioLoudness_times_LivePerformanceLikelihood": "univariate"
+        },
+        "top_features": [
+          [
+            "RhythmScore_times_MoodScore",
+            45.45015309647718
+          ],
+          [
+            "RhythmScore_times_TrackDurationMs",
+            40.37146030073307
+          ],
+          [
+            "MoodScore",
+            26.118708937944074
+          ],
+          [
+            "TrackDurationMs",
+            24.121062526543433
+          ],
+          [
+            "RhythmScore",
+            15.01581459619255
+          ],
+          [
+            "AudioLoudness_times_LivePerformanceLikelihood",
+            11.285923878337096
+          ],
+          [
+            "RhythmScore_times_AudioLoudness",
+            10.56772690301867
+          ],
+          [
+            "RhythmScore_div_LivePerformanceLikelihood",
+            10.495566650671801
+          ],
+          [
+            "AudioLoudness_times_VocalContent",
+            10.438856040917226
+          ],
+          [
+            "Energy",
+            10.044628428686735
+          ]
+        ],
+        "distribution_stats": {
+          "RhythmScore": {
+            "train_mean": 0.6330467245049103,
+            "test_mean": 0.6325913468095755,
+            "mean_diff": 0.0004553776953347688,
+            "normalized_mean_diff": 0.002910185785945856,
+            "train_std": 0.1564771904027302,
+            "test_std": 0.1572291942211936,
+            "std_ratio": 1.0048058366623784
+          },
+          "AudioLoudness": {
+            "train_mean": -8.362888570879232,
+            "test_mean": -8.377495315054558,
+            "mean_diff": 0.01460674417532637,
+            "normalized_mean_diff": 0.0031957660987355367,
+            "train_std": 4.570654961608672,
+            "test_std": 4.6222875257246905,
+            "std_ratio": 1.0112965350807943
+          },
+          "VocalContent": {
+            "train_mean": 0.07425945430342852,
+            "test_mean": 0.07447462776435852,
+            "mean_diff": 0.00021517346093000156,
+            "normalized_mean_diff": 0.004355561073989562,
+            "train_std": 0.04940200751975892,
+            "test_std": 0.05002446724173989,
+            "std_ratio": 1.0125998871955155
+          },
+          "AcousticQuality": {
+            "train_mean": 0.26291257226875914,
+            "test_mean": 0.2629031455927158,
+            "mean_diff": 9.426676043311488e-06,
+            "normalized_mean_diff": 4.224931655172642e-05,
+            "train_std": 0.223120201998304,
+            "test_std": 0.22289912408048657,
+            "std_ratio": 1.0009918294597588
+          },
+          "InstrumentalScore": {
+            "train_mean": 0.11740534856826369,
+            "test_mean": 0.11740722289908517,
+            "mean_diff": 1.8743308214802523e-06,
+            "normalized_mean_diff": 1.431059835947354e-05,
+            "train_std": 0.13097501406986628,
+            "test_std": 0.1316281781650568,
+            "std_ratio": 1.0049869366293185
+          },
+          "LivePerformanceLikelihood": {
+            "train_mean": 0.17813817169140284,
+            "test_mean": 0.17831655787234268,
+            "mean_diff": 0.00017838618093984904,
+            "normalized_mean_diff": 0.001517904816322866,
+            "train_std": 0.11752132216827053,
+            "test_std": 0.11816476612689043,
+            "std_ratio": 1.0054751252517276
+          },
+          "MoodScore": {
+            "train_mean": 0.5558431960329171,
+            "test_mean": 0.5558612048743794,
+            "mean_diff": 1.8008841462302527e-05,
+            "normalized_mean_diff": 7.986883863770839e-05,
+            "train_std": 0.2254801969012234,
+            "test_std": 0.22621799640865511,
+            "std_ratio": 1.0032721255239765
+          },
+          "TrackDurationMs": {
+            "train_mean": 242129.86044306462,
+            "test_mean": 241753.73641926915,
+            "mean_diff": 376.1240237954771,
+            "normalized_mean_diff": 0.00645494757205863,
+            "train_std": 58269.10592172674,
+            "test_std": 59103.89661581213,
+            "std_ratio": 1.014326471650462
+          },
+          "Energy": {
+            "train_mean": 0.5009196821495722,
+            "test_mean": 0.5005448678362814,
+            "mean_diff": 0.0003748143132907833,
+            "normalized_mean_diff": 0.0012935034617695444,
+            "train_std": 0.28976676473523166,
+            "test_std": 0.2905496638757968,
+            "std_ratio": 1.0027018251775026
+          },
+          "RhythmScore_div_AudioLoudness": {
+            "train_mean": -0.130016331395431,
+            "test_mean": -0.13009557278560047,
+            "mean_diff": 7.924139016945997e-05,
+            "normalized_mean_diff": 0.000581095755111951,
+            "train_std": 0.13636546037785757,
+            "test_std": 0.13666348545398233,
+            "std_ratio": 1.0021854879915995
+          },
+          "RhythmScore_times_AudioLoudness": {
+            "train_mean": -5.3066107734647945,
+            "test_mean": -5.313274125024993,
+            "mean_diff": 0.006663351560198372,
+            "normalized_mean_diff": 0.0020400739959316426,
+            "train_std": 3.266230329628516,
+            "test_std": 3.301723676144717,
+            "std_ratio": 1.010866761659224
+          },
+          "RhythmScore_div_VocalContent": {
+            "train_mean": 13.908166423962692,
+            "test_mean": 13.901891844914774,
+            "mean_diff": 0.006274579047918394,
+            "normalized_mean_diff": 0.0006172065951416232,
+            "train_std": 10.166092030300874,
+            "test_std": 10.183466776529063,
+            "std_ratio": 1.0017090880326878
+          },
+          "RhythmScore_times_VocalContent": {
+            "train_mean": 0.04707603044268591,
+            "test_mean": 0.04717475361544026,
+            "mean_diff": 9.872317275435444e-05,
+            "normalized_mean_diff": 0.0028807600070190893,
+            "train_std": 0.034269835916151084,
+            "test_std": 0.0346626635748988,
+            "std_ratio": 1.0114627820135718
+          },
+          "RhythmScore_div_AcousticQuality": {
+            "train_mean": 19844.5902137135,
+            "test_mean": 19681.029977859478,
+            "mean_diff": 163.56023585402363,
+            "normalized_mean_diff": 0.003583867373986599,
+            "train_std": 45637.91535401701,
+            "test_std": 45429.358388276865,
+            "std_ratio": 1.0045907970779082
+          },
+          "RhythmScore_times_AcousticQuality": {
+            "train_mean": 0.16741521829641406,
+            "test_mean": 0.16753809946606749,
+            "mean_diff": 0.00012288116965342155,
+            "normalized_mean_diff": 0.0008072384295732208,
+            "train_std": 0.15222413248882075,
+            "test_std": 0.152556991853004,
+            "std_ratio": 1.002186639915374
+          },
+          "RhythmScore_div_InstrumentalScore": {
+            "train_mean": 195403.89594105838,
+            "test_mean": 194794.73946887208,
+            "mean_diff": 609.156472186296,
+            "normalized_mean_diff": 0.0020994151507767378,
+            "train_std": 290155.3187138434,
+            "test_std": 290090.84326510417,
+            "std_ratio": 1.0002222595102057
+          },
+          "RhythmScore_times_InstrumentalScore": {
+            "train_mean": 0.07454858637104325,
+            "test_mean": 0.07435149496329263,
+            "mean_diff": 0.0001970914077506214,
+            "normalized_mean_diff": 0.0022444695293954158,
+            "train_std": 0.08781202202540533,
+            "test_std": 0.08794827955524909,
+            "std_ratio": 1.0015516956186743
+          },
+          "RhythmScore_div_LivePerformanceLikelihood": {
+            "train_mean": 7.770689769237458,
+            "test_mean": 7.744087852377054,
+            "mean_diff": 0.026601916860403918,
+            "normalized_mean_diff": 0.003018742114127047,
+            "train_std": 8.81225220793549,
+            "test_std": 8.780009303290067,
+            "std_ratio": 1.0036723087108053
+          },
+          "RhythmScore_times_LivePerformanceLikelihood": {
+            "train_mean": 0.11334100409906678,
+            "test_mean": 0.11341361514649544,
+            "mean_diff": 7.261104742865843e-05,
+            "normalized_mean_diff": 0.0008858080258338606,
+            "train_std": 0.08197153933021276,
+            "test_std": 0.08237514500063474,
+            "std_ratio": 1.0049237293055593
+          },
+          "RhythmScore_div_MoodScore": {
+            "train_mean": 2.361930276898306,
+            "test_mean": 2.3743833349862666,
+            "mean_diff": 0.012453058087960489,
+            "normalized_mean_diff": 0.00241578505399174,
+            "train_std": 5.154870077279263,
+            "test_std": 5.180855800870658,
+            "std_ratio": 1.0050410045649707
+          },
+          "RhythmScore_times_MoodScore": {
+            "train_mean": 0.3515553491032598,
+            "test_mean": 0.35125989200116275,
+            "mean_diff": 0.000295457102097052,
+            "normalized_mean_diff": 0.0017447673224446779,
+            "train_std": 0.16933897047262025,
+            "test_std": 0.16983935935290967,
+            "std_ratio": 1.0029549540716638
+          },
+          "RhythmScore_div_TrackDurationMs": {
+            "train_mean": 2.80439426864635e-06,
+            "test_mean": 2.8323522142373258e-06,
+            "mean_diff": 2.795794559097595e-08,
+            "normalized_mean_diff": 0.025352967995988514,
+            "train_std": 1.102748427537147e-06,
+            "test_std": 1.2468291961935808e-06,
+            "std_ratio": 1.1306560635758243
+          },
+          "RhythmScore_times_TrackDurationMs": {
+            "train_mean": 153117.43157665912,
+            "test_mean": 152733.83574015804,
+            "mean_diff": 383.5958365010738,
+            "normalized_mean_diff": 0.007182236291122527,
+            "train_std": 53408.969150069664,
+            "test_std": 53742.663461107884,
+            "std_ratio": 1.006247907726895
+          },
+          "RhythmScore_div_Energy": {
+            "train_mean": 3.6530638555912254,
+            "test_mean": 5.044661339870332,
+            "mean_diff": 1.391597484279107,
+            "normalized_mean_diff": 0.16656283226992047,
+            "train_std": 8.35478999314792,
+            "test_std": 32.62676606273723,
+            "std_ratio": 3.905156932669245
+          },
+          "RhythmScore_times_Energy": {
+            "train_mean": 0.31046761088840774,
+            "test_mean": 0.30973492566202715,
+            "mean_diff": 0.0007326852263805916,
+            "normalized_mean_diff": 0.0037530323641759857,
+            "train_std": 0.19522486226719757,
+            "test_std": 0.19555607362451521,
+            "std_ratio": 1.001696563406275
+          },
+          "AudioLoudness_div_VocalContent": {
+            "train_mean": -182.83830613301365,
+            "test_mean": -183.0675996842878,
+            "mean_diff": 0.22929355127416784,
+            "normalized_mean_diff": 0.001349012989658744,
+            "train_std": 169.97134425827255,
+            "test_std": 170.8552389908154,
+            "std_ratio": 1.0052002573516143
+          },
+          "AudioLoudness_times_VocalContent": {
+            "train_mean": -0.6231403922235397,
+            "test_mean": -0.6262126998227983,
+            "mean_diff": 0.0030723075992585835,
+            "normalized_mean_diff": 0.005275806386614036,
+            "train_std": 0.5823389590364332,
+            "test_std": 0.5935829026994539,
+            "std_ratio": 1.0193082456334803
+          },
+          "AudioLoudness_div_AcousticQuality": {
+            "train_mean": -268798.1946085555,
+            "test_mean": -268154.97890532494,
+            "mean_diff": 643.215703230584,
+            "normalized_mean_diff": 0.0009304959365932529,
+            "train_std": 691261.1629294546,
+            "test_std": 693871.668554301,
+            "std_ratio": 1.003776439014429
+          },
+          "AudioLoudness_times_AcousticQuality": {
+            "train_mean": -2.212347202709963,
+            "test_mean": -2.217657543216776,
+            "mean_diff": 0.005310340506813116,
+            "normalized_mean_diff": 0.002141880075225185,
+            "train_std": 2.479289372097463,
+            "test_std": 2.4928904803640397,
+            "std_ratio": 1.0054858897955385
+          },
+          "AudioLoudness_div_InstrumentalScore": {
+            "train_mean": -2584709.745961714,
+            "test_mean": -2581922.171470004,
+            "mean_diff": 2787.5744917099364,
+            "normalized_mean_diff": 0.0006301793128444859,
+            "train_std": 4423462.393786714,
+            "test_std": 4446053.472213292,
+            "std_ratio": 1.0051071030824879
+          },
+          "AudioLoudness_times_InstrumentalScore": {
+            "train_mean": -0.9796755802986981,
+            "test_mean": -0.9777386326192693,
+            "mean_diff": 0.0019369476794287577,
+            "normalized_mean_diff": 0.001429539272803789,
+            "train_std": 1.3549454123283908,
+            "test_std": 1.361424372088008,
+            "std_ratio": 1.0047817127543783
+          },
+          "AudioLoudness_div_LivePerformanceLikelihood": {
+            "train_mean": -102.66602868051216,
+            "test_mean": -102.87524676135679,
+            "mean_diff": 0.20921808084463578,
+            "normalized_mean_diff": 0.0015223567187563928,
+            "train_std": 137.43039214589942,
+            "test_std": 138.38464571359796,
+            "std_ratio": 1.0069435410377459
+          },
+          "AudioLoudness_times_LivePerformanceLikelihood": {
+            "train_mean": -1.5015083305005161,
+            "test_mean": -1.504360720452914,
+            "mean_diff": 0.0028523899523977825,
+            "normalized_mean_diff": 0.0020348507437475062,
+            "train_std": 1.4017686364281665,
+            "test_std": 1.416094070249155,
+            "std_ratio": 1.010219542261618
+          },
+          "AudioLoudness_div_MoodScore": {
+            "train_mean": -31.0102043128357,
+            "test_mean": -31.30621731703746,
+            "mean_diff": 0.296013004201761,
+            "normalized_mean_diff": 0.0038733981254087902,
+            "train_std": 76.4220445763035,
+            "test_std": 77.35366689534442,
+            "std_ratio": 1.0121904919477878
+          },
+          "row_sum": {
+            "train_mean": -2243316.712340003,
+            "test_mean": -2241417.754068583,
+            "mean_diff": 1898.9582714200951,
+            "normalized_mean_diff": 0.0004399728503326227,
+            "train_std": 4316080.571754527,
+            "test_std": 4341379.7593386285,
+            "std_ratio": 1.0058616115161672
+          },
+          "row_mean": {
+            "train_mean": -65979.90330411773,
+            "test_mean": -65924.05159025243,
+            "mean_diff": 55.851713865296915,
+            "normalized_mean_diff": 0.0004399728503326226,
+            "train_std": 126943.54622807435,
+            "test_std": 127687.63998054789,
+            "std_ratio": 1.0058616115161667
+          },
+          "row_std": {
+            "train_mean": 506737.34566993656,
+            "test_mean": 506232.0169099528,
+            "mean_diff": 505.32875998376403,
+            "normalized_mean_diff": 0.0006872554712534058,
+            "train_std": 735285.1757762705,
+            "test_std": 739384.049043822,
+            "std_ratio": 1.0055745354354848
+          },
+          "row_min": {
+            "train_mean": -2756742.375450968,
+            "test_mean": -2753849.5251430515,
+            "mean_diff": 2892.850307916291,
+            "normalized_mean_diff": 0.0006636628411747283,
+            "train_std": 4358915.594544588,
+            "test_std": 4382237.478395929,
+            "std_ratio": 1.0053503866605102
+          },
+          "row_max": {
+            "train_mean": 357362.50050784927,
+            "test_mean": 356797.6110176961,
+            "mean_diff": 564.8894901531748,
+            "normalized_mean_diff": 0.0029710048150946833,
+            "train_std": 190134.15504517528,
+            "test_std": 190519.62370264978,
+            "std_ratio": 1.0020273509374626
+          },
+          "row_range": {
+            "train_mean": 3114104.8759588175,
+            "test_mean": 3110647.136160748,
+            "mean_diff": 3457.739798069466,
+            "normalized_mean_diff": 0.0007692558065875257,
+            "train_std": 4494915.434448587,
+            "test_std": 4518021.652955254,
+            "std_ratio": 1.0051405235189927
+          }
+        },
+        "unstable_features": [
+          "RhythmScore_div_Energy"
+        ]
+      },
+      "transformation_report": {
+        "transformations_applied": {
+          "scaling_standard": [
+            "RhythmScore",
+            "AudioLoudness",
+            "InstrumentalScore",
+            "LivePerformanceLikelihood",
+            "MoodScore",
+            "TrackDurationMs",
+            "Energy",
+            "RhythmScore_times_AudioLoudness",
+            "RhythmScore_div_AcousticQuality",
+            "RhythmScore_div_InstrumentalScore",
+            "RhythmScore_div_LivePerformanceLikelihood",
+            "RhythmScore_times_MoodScore",
+            "RhythmScore_times_TrackDurationMs",
+            "RhythmScore_times_Energy",
+            "AudioLoudness_times_VocalContent",
+            "AudioLoudness_div_AcousticQuality",
+            "AudioLoudness_times_AcousticQuality",
+            "AudioLoudness_times_InstrumentalScore",
+            "AudioLoudness_div_LivePerformanceLikelihood",
+            "AudioLoudness_times_LivePerformanceLikelihood"
+          ]
+        },
+        "scalers_fitted": [
+          "numerical_standard",
+          "numerical_standard_columns"
+        ],
+        "encoders_fitted": [],
+        "imputers_fitted": []
+      },
+      "data_shapes": {
+        "train_final": [
+          524164,
+          21
+        ],
+        "test_final": [
+          174722,
+          20
+        ]
+      }
+    },
+    "model_selector": {
+      "competition_name": "playground-series-s5e9",
+      "problem_type": "regression",
+      "target_column": "BeatsPerMinute",
+      "models_evaluated": 10,
+      "best_model_name": "ensemble_voting",
+      "best_model_score": 697.5691433461726,
+      "best_single_model": "lasso",
+      "best_single_score": 697.1607617930331,
+      "optimized_parameters": {
+        "alpha": 0.008539771996977141,
+        "max_iter": 9588
+      },
+      "ensemble_score": 697.5691433461726,
+      "ensemble_type": "voting",
+      "model_comparison": [
+        {
+          "name": "random_forest",
+          "score": 708.3384687563822
+        },
+        {
+          "name": "extra_trees",
+          "score": 706.8813987195514
+        },
+        {
+          "name": "ridge",
+          "score": 699.024751396916
+        },
+        {
+          "name": "lasso",
+          "score": 697.1607617930331
+        },
+        {
+          "name": "elastic_net",
+          "score": 697.2131521203271
+        },
+        {
+          "name": "knn",
+          "score": 810.1914625311576
+        },
+        {
+          "name": "svr",
+          "score": 719.1459939247471
+        },
+        {
+          "name": "xgboost",
+          "score": 789.5366843500731
+        },
+        {
+          "name": "lightgbm",
+          "score": 810.1005067420463
+        },
+        {
+          "name": "catboost",
+          "score": 751.9005487943521
+        }
+      ],
+      "data_shape": [
+        5000,
+        20
+      ],
+      "feature_count": 20
+    },
+    "submission_created": true,
+    "kaggle_submission": true
+  },
+  "final_score": 697.5691433461726,
+  "best_model": "ensemble_voting"
+}

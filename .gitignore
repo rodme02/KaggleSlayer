@@ -32,11 +32,9 @@ ENV/
 *.tsv
 *.parquet
 
-competition_data/digit-recognizer/
-
 # Logs and results
 *.log
-results/
+#results/
 outputs/
 
 # Model artifacts

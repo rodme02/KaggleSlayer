@@ -1,0 +1,96 @@
+{
+  "competition_name": "playground-series-s5e9",
+  "dataset_info": {
+    "total_rows": 524164,
+    "total_columns": 10,
+    "target_column": "BeatsPerMinute",
+    "feature_types": {
+      "id": "identifier",
+      "RhythmScore": "numerical",
+      "AudioLoudness": "numerical",
+      "VocalContent": "numerical",
+      "AcousticQuality": "numerical",
+      "InstrumentalScore": "numerical",
+      "LivePerformanceLikelihood": "numerical",
+      "MoodScore": "numerical",
+      "TrackDurationMs": "numerical",
+      "Energy": "numerical",
+      "BeatsPerMinute": "numerical"
+    },
+    "missing_values": {
+      "RhythmScore": 0,
+      "AudioLoudness": 0,
+      "VocalContent": 0,
+      "AcousticQuality": 0,
+      "InstrumentalScore": 0,
+      "LivePerformanceLikelihood": 0,
+      "MoodScore": 0,
+      "TrackDurationMs": 0,
+      "Energy": 0,
+      "BeatsPerMinute": 0
+    },
+    "duplicates_removed": 0,
+    "memory_usage_mb": 39.990665435791016
+  },
+  "validation_results": {
+    "train_valid": true,
+    "train_issues": [],
+    "train_warnings": [],
+    "statistics": {
+      "shape": [
+        524164,
+        10
+      ],
+      "memory_usage_mb": 39.990665435791016,
+      "missing_values": {
+        "RhythmScore": 0,
+        "AudioLoudness": 0,
+        "VocalContent": 0,
+        "AcousticQuality": 0,
+        "InstrumentalScore": 0,
+        "LivePerformanceLikelihood": 0,
+        "MoodScore": 0,
+        "TrackDurationMs": 0,
+        "Energy": 0,
+        "BeatsPerMinute": 0
+      },
+      "missing_percentages": {
+        "RhythmScore": 0.0,
+        "AudioLoudness": 0.0,
+        "VocalContent": 0.0,
+        "AcousticQuality": 0.0,
+        "InstrumentalScore": 0.0,
+        "LivePerformanceLikelihood": 0.0,
+        "MoodScore": 0.0,
+        "TrackDurationMs": 0.0,
+        "Energy": 0.0,
+        "BeatsPerMinute": 0.0
+      },
+      "duplicates_count": "0",
+      "numerical_columns": [
+        "RhythmScore",
+        "AudioLoudness",
+        "VocalContent",
+        "AcousticQuality",
+        "InstrumentalScore",
+        "LivePerformanceLikelihood",
+        "MoodScore",
+        "TrackDurationMs",
+        "Energy",
+        "BeatsPerMinute"
+      ],
+      "categorical_columns": []
+    }
+  },
+  "preprocessing_applied": {
+    "missing_values_handled": true,
+    "duplicates_removed": 0,
+    "outliers_detected": 2
+  },
+  "recommendations": {
+    "target_column": "BeatsPerMinute",
+    "problem_type": "regression",
+    "feature_count": 10,
+    "sample_count": 524164
+  }
+}

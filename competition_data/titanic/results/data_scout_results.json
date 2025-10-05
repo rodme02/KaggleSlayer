@@ -1,0 +1,112 @@
+{
+  "competition_name": "titanic",
+  "dataset_info": {
+    "total_rows": 891,
+    "total_columns": 13,
+    "target_column": "Survived",
+    "feature_types": {
+      "PassengerId": "identifier",
+      "Survived": "binary",
+      "Pclass": "ordinal",
+      "Name": "high_cardinality_text",
+      "Sex": "categorical",
+      "Age": "numerical",
+      "SibSp": "categorical_numeric",
+      "Parch": "ordinal",
+      "Ticket": "text",
+      "Fare": "numerical",
+      "Cabin": "categorical",
+      "Embarked": "categorical"
+    },
+    "missing_values": {
+      "Survived": 0,
+      "Pclass": 0,
+      "Name": 0,
+      "Sex": 0,
+      "Age": 0,
+      "SibSp": 0,
+      "Parch": 0,
+      "Ticket": 0,
+      "Fare": 0,
+      "Cabin": 0,
+      "Embarked": 0,
+      "Age_was_missing": 0,
+      "Cabin_was_missing": 0
+    },
+    "duplicates_removed": 0,
+    "memory_usage_mb": 0.30542564392089844
+  },
+  "validation_results": {
+    "train_valid": true,
+    "train_issues": [],
+    "train_warnings": [
+      "training has columns with >50% missing data: ['Cabin']"
+    ],
+    "statistics": {
+      "shape": [
+        891,
+        13
+      ],
+      "memory_usage_mb": 0.30542564392089844,
+      "missing_values": {
+        "Survived": 0,
+        "Pclass": 0,
+        "Name": 0,
+        "Sex": 0,
+        "Age": 0,
+        "SibSp": 0,
+        "Parch": 0,
+        "Ticket": 0,
+        "Fare": 0,
+        "Cabin": 0,
+        "Embarked": 0,
+        "Age_was_missing": 0,
+        "Cabin_was_missing": 0
+      },
+      "missing_percentages": {
+        "Survived": 0.0,
+        "Pclass": 0.0,
+        "Name": 0.0,
+        "Sex": 0.0,
+        "Age": 0.0,
+        "SibSp": 0.0,
+        "Parch": 0.0,
+        "Ticket": 0.0,
+        "Fare": 0.0,
+        "Cabin": 0.0,
+        "Embarked": 0.0,
+        "Age_was_missing": 0.0,
+        "Cabin_was_missing": 0.0
+      },
+      "duplicates_count": "0",
+      "numerical_columns": [
+        "Survived",
+        "Pclass",
+        "Age",
+        "SibSp",
+        "Parch",
+        "Fare",
+        "Age_was_missing",
+        "Cabin_was_missing"
+      ],
+      "categorical_columns": [
+        "Name",
+        "Sex",
+        "Ticket",
+        "Cabin",
+        "Embarked"
+      ]
+    }
+  },
+  "preprocessing_applied": {
+    "missing_values_handled": true,
+    "duplicates_removed": 0,
+    "outliers_detected": 3
+  },
+  "recommendations": {
+    "target_column": "Survived",
+    "problem_type": "classification",
+    "feature_count": 13,
+    "sample_count": 891
+  }
+}
