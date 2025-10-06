@@ -98,15 +98,30 @@ class PipelineCoordinator(BaseAgent):
             print(f"[OK] Data Scout completed in {time.time() - step_start:.1f}s")
 
             # Step 2: Feature Engineering
-            print(f"\n{'='*70}")
-            print("  STEP 2/4: FEATURE ENGINEER - Creating Powerful Features")
-            print("="*70)
-            self.log_info("Generating, selecting, and transforming features...")
-            step_start = time.time()
-            feature_results = self.feature_engineer.run()
-            pipeline_results['results']['feature_engineer'] = feature_results
-            pipeline_results['steps_completed'].append('feature_engineer')
-            print(f"[OK] Feature Engineering completed in {time.time() - step_start:.1f}s")
+            # For leak-free CV mode, we can skip this step for large datasets
+            # since feature engineering happens inside CV folds anyway
+            train_size = data_results.get('dataset_info', {}).get('total_rows', 0) if data_results else 0
+
+            if train_size > 100000:
+                print(f"\n{'='*70}")
+                print("  STEP 2/4: FEATURE ENGINEER - Skipped (large dataset)")
+                print("="*70)
+                self.log_info("Skipping standalone feature engineering for large dataset")
+                self.log_info("Feature engineering will happen inside CV folds (leak-free)")
+                feature_results = {'skipped': True, 'reason': 'large_dataset'}
+                pipeline_results['results']['feature_engineer'] = feature_results
+                pipeline_results['steps_completed'].append('feature_engineer')
+                print(f"[OK] Feature Engineering will be done inside CV folds")
+            else:
+                print(f"\n{'='*70}")
+                print("  STEP 2/4: FEATURE ENGINEER - Creating Powerful Features")
+                print("="*70)
+                self.log_info("Generating, selecting, and transforming features...")
+                step_start = time.time()
+                feature_results = self.feature_engineer.run()
+                pipeline_results['results']['feature_engineer'] = feature_results
+                pipeline_results['steps_completed'].append('feature_engineer')
+                print(f"[OK] Feature Engineering completed in {time.time() - step_start:.1f}s")
 
             # Step 3: Model Selection and Training
             print(f"\n{'='*70}")
@@ -114,9 +129,13 @@ class PipelineCoordinator(BaseAgent):
             print("="*70)
             self.log_info("Training multiple models and finding the best...")
             step_start = time.time()
+            # CRITICAL: Use leak-free CV (feature engineering inside folds)
             # Disable hyperparameter optimization by default to keep output clean
-            # (can be enabled by modifying this line)
-            model_results = self.model_selector.run(optimize_hyperparameters=False)
+            model_results = self.model_selector.run(
+                optimize_hyperparameters=False,
+                create_ensemble=False,  # Disable ensemble to keep output clean
+                use_feature_pipeline=True  # CRITICAL: Prevents data leakage
+            )
             pipeline_results['results']['model_selector'] = model_results
             pipeline_results['steps_completed'].append('model_selector')
             print(f"[OK] Model Selection completed in {time.time() - step_start:.1f}s")
@@ -250,14 +269,43 @@ class PipelineCoordinator(BaseAgent):
             model_path = self.file_manager.get_file_path("best_model.pkl")
             trained_pipeline = joblib.load(model_path)
 
+            # Load target encoder if it exists (for string classification labels)
+            target_encoder = None
+            encoder_path = self.file_manager.get_file_path("target_encoder.pkl")
+            if encoder_path.exists():
+                target_encoder = joblib.load(encoder_path)
+                self.log_info(f"Loaded target encoder with classes: {list(target_encoder.classes_)}")
+
             # Generate predictions using the full pipeline
             # The pipeline will handle feature engineering internally
             predictions = trained_pipeline.predict(test_features)
             self.log_info(f"Generated {len(predictions)} predictions using {model_results['best_model_name']}")
 
+            # Decode predictions if we have a target encoder
+            if target_encoder is not None:
+                predictions = target_encoder.inverse_transform(predictions)
+                self.log_info("Decoded predictions back to original labels")
+
             # Format predictions for classification
             if data_results.get('recommendations', {}).get('problem_type') == 'classification':
-                predictions = [int(pred) for pred in predictions]
+                # Flatten predictions if they're arrays/lists
+                import numpy as np
+                if isinstance(predictions, np.ndarray):
+                    predictions = predictions.flatten()
+
+                # Extract scalar values from any nested structures
+                predictions = [pred[0] if isinstance(pred, (list, np.ndarray)) else pred for pred in predictions]
+
+                # Ensure predictions are in the right format (int or string)
+                if target_encoder is None:
+                    # No encoder, try to convert to int
+                    try:
+                        predictions = [int(pred) for pred in predictions]
+                    except (ValueError, TypeError):
+                        predictions = [str(pred) if not isinstance(pred, str) else pred for pred in predictions]
+                else:
+                    # Already decoded to strings, ensure they're strings
+                    predictions = [str(pred) if not isinstance(pred, str) else pred for pred in predictions]
 
             # Validate prediction count and create submission
             if sample_submission_df is not None:

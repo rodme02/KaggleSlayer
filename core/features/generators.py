@@ -10,6 +10,9 @@ from sklearn.feature_selection import SelectKBest, f_classif, f_regression
 from sklearn.cluster import KMeans
 from scipy.stats import skew
 import warnings
+from pathlib import Path
+import hashlib
+import pickle
 
 from .utils import detect_id_columns, is_numeric_dtype
 from utils.logging import verbose_print
@@ -17,10 +20,72 @@ from utils.logging import verbose_print
 warnings.filterwarnings('ignore')
 
 
-class FeatureGenerator:
-    """Generates new features from existing data."""
+class FeatureCache:
+    """Simple file-based cache for expensive feature computations."""
 
-    def __init__(self, max_features: int = 25, polynomial_degree: int = 2):
+    def __init__(self, cache_dir: Optional[Path] = None):
+        """Initialize feature cache.
+
+        Args:
+            cache_dir: Directory for cache files (default: .cache/features)
+        """
+        if cache_dir is None:
+            cache_dir = Path(".cache/features")
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_cache_key(self, df: pd.DataFrame, operation: str, params: Dict[str, Any]) -> str:
+        """Generate cache key from dataframe content and operation parameters."""
+        # Hash the dataframe content + operation + params
+        df_hash = hashlib.md5(pd.util.hash_pandas_object(df).values).hexdigest()[:8]
+        params_str = str(sorted(params.items()))
+        params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
+        return f"{operation}_{df_hash}_{params_hash}.pkl"
+
+    def get(self, df: pd.DataFrame, operation: str, params: Dict[str, Any]) -> Optional[pd.DataFrame]:
+        """Get cached result if available."""
+        cache_key = self._get_cache_key(df, operation, params)
+        cache_file = self.cache_dir / cache_key
+
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'rb') as f:
+                    cached_df = pickle.load(f)
+                verbose_print(f"[Cache] Loaded {operation} from cache")
+                return cached_df
+            except Exception as e:
+                verbose_print(f"[Cache] Failed to load cache: {e}")
+                return None
+        return None
+
+    def set(self, df: pd.DataFrame, operation: str, params: Dict[str, Any], result: pd.DataFrame):
+        """Cache the result of an expensive operation."""
+        cache_key = self._get_cache_key(df, operation, params)
+        cache_file = self.cache_dir / cache_key
+
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(result, f)
+            verbose_print(f"[Cache] Saved {operation} to cache")
+        except Exception as e:
+            verbose_print(f"[Cache] Failed to save cache: {e}")
+
+    def clear(self):
+        """Clear all cached results."""
+        import shutil
+        if self.cache_dir.exists():
+            shutil.rmtree(self.cache_dir)
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        verbose_print("[Cache] Cleared all cached features")
+
+
+class FeatureGenerator:
+    """Generates new features from existing data.
+
+    Includes feature importance tracking to identify and prune low-value features.
+    """
+
+    def __init__(self, max_features: int = 25, polynomial_degree: int = 2, use_cache: bool = True):
         self.max_features = max_features
         self.polynomial_degree = polynomial_degree
         self.created_features = []
@@ -31,9 +96,18 @@ class FeatureGenerator:
         self.id_columns = []  # Will be auto-detected
         self.kmeans_models = {}  # Store KMeans models for clustering features
         self.binning_transformers = {}  # Store binning transformers
+        self.feature_importances = {}  # Store feature importance scores
+        self.cache = FeatureCache() if use_cache else None  # Feature computation cache
+        self.numerical_feature_recipes = []  # Store recipes for numerical features (col1, col2, operation)
 
-    def generate_numerical_features(self, df: pd.DataFrame, target_col: Optional[str] = None) -> pd.DataFrame:
-        """Generate numerical features from existing numerical columns."""
+    def generate_numerical_features(self, df: pd.DataFrame, target_col: Optional[str] = None, fit: bool = True) -> pd.DataFrame:
+        """Generate numerical features from existing numerical columns.
+
+        Args:
+            df: Input dataframe
+            target_col: Target column to exclude
+            fit: If True, determine which features to create. If False, use stored recipes.
+        """
         df_engineered = df.copy()
         numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
@@ -52,65 +126,102 @@ class FeatureGenerator:
         if len(numerical_cols) < 2:
             return df_engineered
 
-        verbose_print(f"Generating numerical features from {len(numerical_cols)} columns...")
+        if fit:
+            # FIT mode: Determine which features to create and store recipes
+            verbose_print(f"Generating numerical features from {len(numerical_cols)} columns...")
+            self.numerical_feature_recipes = []  # Reset recipes
+            feature_count = 0
 
-        # Create more meaningful features based on data types and relationships
-        feature_count = 0
-
-        # First, create features that commonly make sense
-        for i, col1 in enumerate(numerical_cols):
-            if feature_count >= self.max_features:
-                break
-
-            for j, col2 in enumerate(numerical_cols[i+1:], i+1):
+            # First, create features that commonly make sense
+            for i, col1 in enumerate(numerical_cols):
                 if feature_count >= self.max_features:
                     break
 
-                # Only create ratio if denominator is never zero and has meaningful variance
-                col2_values = df[col2].replace(0, np.nan).dropna()
-                if len(col2_values) > 0 and col2_values.std() > 0.01:
+                for j, col2 in enumerate(numerical_cols[i+1:], i+1):
+                    if feature_count >= self.max_features:
+                        break
+
+                    # Only create ratio if denominator is never zero and has meaningful variance
+                    col2_values = df[col2].replace(0, np.nan).dropna()
+                    if len(col2_values) > 0 and col2_values.std() > 0.01:
+                        # Store recipe
+                        self.numerical_feature_recipes.append((col1, col2, 'div'))
+
+                        new_col = f"{col1}_div_{col2}"
+                        df_engineered[new_col] = df[col1] / df[col2].replace(0, np.nan)
+                        df_engineered[new_col] = df_engineered[new_col].fillna(df_engineered[new_col].median())
+                        self._record_feature(new_col, f"Ratio of {col1} and {col2}")
+                        feature_count += 1
+
+                        if feature_count >= self.max_features:
+                            break
+
+                    # Create product only if both columns have reasonable scale
+                    col1_scale = abs(df[col1].mean())
+                    col2_scale = abs(df[col2].mean())
+                    if col1_scale > 0 and col2_scale > 0 and col1_scale * col2_scale < 1e6:
+                        # Store recipe
+                        self.numerical_feature_recipes.append((col1, col2, 'times'))
+
+                        new_col = f"{col1}_times_{col2}"
+                        df_engineered[new_col] = df[col1] * df[col2]
+                        self._record_feature(new_col, f"Product of {col1} and {col2}")
+                        feature_count += 1
+
+                        if feature_count >= self.max_features:
+                            break
+
+            # Add individual column transformations
+            for col in numerical_cols[:5]:  # Limit to top 5 numerical columns
+                if feature_count >= self.max_features:
+                    break
+
+                # Log transformation for positive skewed data
+                if (df[col] > 0).all() and df[col].skew() > 1:
+                    self.numerical_feature_recipes.append((col, None, 'log'))
+
+                    new_col = f"{col}_log"
+                    df_engineered[new_col] = np.log1p(df[col])
+                    self._record_feature(new_col, f"Log transformation of {col}")
+                    feature_count += 1
+
+                # Square root for positive data with high variance
+                if (df[col] >= 0).all() and df[col].std() > df[col].mean():
+                    self.numerical_feature_recipes.append((col, None, 'sqrt'))
+
+                    new_col = f"{col}_sqrt"
+                    df_engineered[new_col] = np.sqrt(df[col])
+                    self._record_feature(new_col, f"Square root of {col}")
+                    feature_count += 1
+
+                if feature_count >= self.max_features:
+                    break
+
+        else:
+            # TRANSFORM mode: Apply stored recipes to create exact same features
+            for col1, col2, operation in self.numerical_feature_recipes:
+                # Skip if required columns don't exist
+                if col1 not in df.columns:
+                    continue
+                if col2 is not None and col2 not in df.columns:
+                    continue
+
+                if operation == 'div':
                     new_col = f"{col1}_div_{col2}"
                     df_engineered[new_col] = df[col1] / df[col2].replace(0, np.nan)
                     df_engineered[new_col] = df_engineered[new_col].fillna(df_engineered[new_col].median())
-                    self._record_feature(new_col, f"Ratio of {col1} and {col2}")
-                    feature_count += 1
 
-                    if feature_count >= self.max_features:
-                        break
-
-                # Create product only if both columns have reasonable scale
-                col1_scale = abs(df[col1].mean())
-                col2_scale = abs(df[col2].mean())
-                if col1_scale > 0 and col2_scale > 0 and col1_scale * col2_scale < 1e6:
+                elif operation == 'times':
                     new_col = f"{col1}_times_{col2}"
                     df_engineered[new_col] = df[col1] * df[col2]
-                    self._record_feature(new_col, f"Product of {col1} and {col2}")
-                    feature_count += 1
 
-                    if feature_count >= self.max_features:
-                        break
+                elif operation == 'log':
+                    new_col = f"{col1}_log"
+                    df_engineered[new_col] = np.log1p(df[col1].clip(lower=0))  # Clip to avoid negatives
 
-        # Add individual column transformations
-        for col in numerical_cols[:5]:  # Limit to top 5 numerical columns
-            if feature_count >= self.max_features:
-                break
-
-            # Log transformation for positive skewed data
-            if (df[col] > 0).all() and df[col].skew() > 1:
-                new_col = f"{col}_log"
-                df_engineered[new_col] = np.log1p(df[col])
-                self._record_feature(new_col, f"Log transformation of {col}")
-                feature_count += 1
-
-            # Square root for positive data with high variance
-            if (df[col] >= 0).all() and df[col].std() > df[col].mean():
-                new_col = f"{col}_sqrt"
-                df_engineered[new_col] = np.sqrt(df[col])
-                self._record_feature(new_col, f"Square root of {col}")
-                feature_count += 1
-
-            if feature_count >= self.max_features:
-                break
+                elif operation == 'sqrt':
+                    new_col = f"{col1}_sqrt"
+                    df_engineered[new_col] = np.sqrt(df[col1].clip(lower=0))  # Clip to avoid negatives
 
         return df_engineered
 
@@ -589,10 +700,122 @@ class FeatureGenerator:
         self.created_features.append(feature_name)
         self.creation_methods[feature_name] = description
 
+    def calculate_feature_importance(self, df: pd.DataFrame, target_col: str,
+                                    problem_type: str = "auto") -> Dict[str, float]:
+        """Calculate importance scores for all generated features.
+
+        Uses Random Forest feature importance to score features.
+        Scores below 0.01 indicate features that could be pruned.
+
+        Args:
+            df: DataFrame with features and target
+            target_col: Name of target column
+            problem_type: 'classification', 'regression', or 'auto'
+
+        Returns:
+            Dictionary mapping feature names to importance scores
+        """
+        if target_col not in df.columns:
+            return {}
+
+        # Select only created features
+        feature_cols = [col for col in self.created_features if col in df.columns]
+        if len(feature_cols) == 0:
+            return {}
+
+        # Determine problem type
+        if problem_type == "auto":
+            problem_type = "classification" if df[target_col].nunique() < 20 else "regression"
+
+        try:
+            # Use Random Forest for importance
+            if problem_type == "classification":
+                from sklearn.ensemble import RandomForestClassifier
+                model = RandomForestClassifier(n_estimators=50, max_depth=10, random_state=42)
+            else:
+                from sklearn.ensemble import RandomForestRegressor
+                model = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
+
+            # Prepare data
+            X = df[feature_cols].fillna(0)
+            y = df[target_col]
+
+            # Handle categorical features (encode them)
+            from sklearn.preprocessing import LabelEncoder
+            for col in feature_cols:
+                if X[col].dtype == 'object':
+                    le = LabelEncoder()
+                    X[col] = le.fit_transform(X[col].astype(str))
+
+            # Fit model
+            model.fit(X, y)
+
+            # Get importances
+            importances = model.feature_importances_
+            self.feature_importances = dict(zip(feature_cols, importances))
+
+            verbose_print(f"Feature importance calculated for {len(feature_cols)} features")
+
+            # Identify low-value features
+            low_value_features = [f for f, score in self.feature_importances.items() if score < 0.01]
+            if low_value_features:
+                verbose_print(f"Found {len(low_value_features)} low-importance features (score < 0.01)")
+
+            return self.feature_importances
+
+        except Exception as e:
+            verbose_print(f"Warning: Feature importance calculation failed: {e}")
+            return {}
+
+    def prune_low_importance_features(self, df: pd.DataFrame, importance_threshold: float = 0.01) -> pd.DataFrame:
+        """Remove features with importance below threshold.
+
+        Args:
+            df: DataFrame to prune
+            importance_threshold: Minimum importance score to keep
+
+        Returns:
+            DataFrame with low-importance features removed
+        """
+        if not self.feature_importances:
+            verbose_print("No feature importances available, skipping pruning")
+            return df
+
+        # Find features to drop
+        features_to_drop = [
+            feature for feature, score in self.feature_importances.items()
+            if score < importance_threshold and feature in df.columns
+        ]
+
+        if len(features_to_drop) > 0:
+            verbose_print(f"Pruning {len(features_to_drop)} low-importance features")
+            df_pruned = df.drop(columns=features_to_drop)
+            # Remove from created features list
+            self.created_features = [f for f in self.created_features if f not in features_to_drop]
+            return df_pruned
+
+        return df
+
+    def get_feature_importance(self) -> Dict[str, float]:
+        """Get feature importance scores.
+
+        Returns:
+            Dictionary mapping feature names to importance scores
+        """
+        return self.feature_importances.copy()
+
     def get_feature_report(self) -> Dict[str, Any]:
         """Get a report of all created features."""
-        return {
+        report = {
             'total_features_created': len(self.created_features),
             'features': self.created_features,
             'creation_methods': self.creation_methods
         }
+
+        if self.feature_importances:
+            report['feature_importances'] = self.feature_importances
+            report['low_importance_features'] = [
+                f for f, score in self.feature_importances.items() if score < 0.01
+            ]
+
+        return report

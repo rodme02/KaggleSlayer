@@ -87,10 +87,9 @@ class DataScoutAgent(BaseAgent):
                     test_cleaned, fit=False, target_col=target_column
                 )
 
-            # Remove duplicates
+            # Remove duplicates from training data only
+            # NEVER remove duplicates from test data - we need predictions for all rows
             train_cleaned, duplicates_removed = self.preprocessor.remove_duplicates(train_cleaned)
-            if test_cleaned is not None:
-                test_cleaned, _ = self.preprocessor.remove_duplicates(test_cleaned)
 
             # Handle outliers (winsorize to 1-99 percentile)
             exclude_cols = [target_column] if target_column else []

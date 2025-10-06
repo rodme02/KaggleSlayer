@@ -5,8 +5,7 @@
     "data_scout",
     "feature_engineer",
     "model_selector",
-    "submission",
-    "kaggle_submission"
+    "submission"
   ],
   "results": {
     "data_scout": {
@@ -124,11 +123,11 @@
     "feature_engineer": {
       "competition_name": "titanic",
       "original_features": 13,
-      "generated_features": 86,
+      "generated_features": 61,
       "final_features": 23,
       "target_column": "Survived",
       "feature_generation_report": {
-        "total_features_created": 86,
+        "total_features_created": 61,
         "features": [
           "Pclass_div_Age",
           "Pclass_times_Age",
@@ -176,31 +175,6 @@
           "row_min",
           "row_max",
           "row_range",
-          "Pclass_div_Age",
-          "Pclass_times_Age",
-          "Pclass_div_SibSp",
-          "Pclass_times_SibSp",
-          "Pclass_div_Parch",
-          "Pclass_times_Parch",
-          "Pclass_div_Fare",
-          "Pclass_times_Fare",
-          "Pclass_times_Age_was_missing",
-          "Pclass_times_Cabin_was_missing",
-          "Age_div_SibSp",
-          "Age_times_SibSp",
-          "Age_div_Parch",
-          "Age_times_Parch",
-          "Age_div_Fare",
-          "Age_times_Fare",
-          "Age_times_Age_was_missing",
-          "Age_times_Cabin_was_missing",
-          "SibSp_div_Parch",
-          "SibSp_times_Parch",
-          "SibSp_div_Fare",
-          "SibSp_times_Fare",
-          "SibSp_times_Age_was_missing",
-          "SibSp_times_Cabin_was_missing",
-          "Parch_div_Fare",
           "Name_len",
           "Name_words",
           "Name_unique_chars",
@@ -959,8 +933,7 @@
       ],
       "feature_count": 12
     },
-    "submission_created": true,
-    "kaggle_submission": true
+    "submission_created": true
   },
   "final_score": 0.8383654510074697,
   "best_model": "random_forest"

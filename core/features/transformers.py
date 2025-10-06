@@ -47,13 +47,22 @@ class FeatureTransformer:
 
     def scale_numerical_features(self, df: pd.DataFrame, method: str = "standard",
                                 target_col: Optional[str] = None, fit: bool = True) -> pd.DataFrame:
-        """Scale numerical features using specified method."""
+        """Scale numerical features using specified method.
+
+        Memory optimization: Uses float32 instead of float64 to reduce memory usage by 50%.
+        """
+        # Memory optimization: Use copy=False when safe, and convert to float32
         df_transformed = df.copy()
         feature_cols = [col for col in df.columns if col != target_col]
         numerical_cols = df[feature_cols].select_dtypes(include=[np.number]).columns
 
         if len(numerical_cols) == 0:
             return df_transformed
+
+        # Convert to float32 to save memory (50% reduction vs float64)
+        for col in numerical_cols:
+            if df_transformed[col].dtype == np.float64:
+                df_transformed[col] = df_transformed[col].astype(np.float32)
 
         verbose_print(f"Scaling numerical features using {method} scaling...")
 
@@ -82,6 +91,49 @@ class FeatureTransformer:
 
         self.transformations_applied[f'scaling_{method}'] = list(numerical_cols)
         return df_transformed
+
+    def encode_target(self, y: pd.Series, fit: bool = True) -> pd.Series:
+        """Encode target column if it's categorical (string labels).
+
+        Args:
+            y: Target series
+            fit: If True, fit the encoder. If False, use stored encoder.
+
+        Returns:
+            Encoded target series (numeric)
+        """
+        # Check if target is string/object type
+        if y.dtype == 'object' or y.dtype.name == 'category':
+            if fit:
+                encoder = LabelEncoder()
+                y_encoded = pd.Series(encoder.fit_transform(y), index=y.index)
+                self.encoders['target_label'] = encoder
+                # Store mapping for later reference
+                self.target_classes_ = encoder.classes_
+                verbose_print(f"Encoded target labels: {list(encoder.classes_)} -> {list(range(len(encoder.classes_)))}")
+            else:
+                if 'target_label' in self.encoders:
+                    encoder = self.encoders['target_label']
+                    # Handle unseen categories
+                    known_classes = set(encoder.classes_)
+                    most_frequent = encoder.classes_[0]
+                    y_cleaned = y.apply(lambda x: x if x in known_classes else most_frequent)
+                    y_encoded = pd.Series(encoder.transform(y_cleaned), index=y.index)
+                else:
+                    # Fallback if not fitted
+                    y_encoded = y
+            return y_encoded
+        else:
+            # Already numeric
+            return y
+
+    def decode_target(self, y_encoded) -> pd.Series:
+        """Decode target predictions back to original labels if they were encoded."""
+        if 'target_label' in self.encoders:
+            encoder = self.encoders['target_label']
+            return encoder.inverse_transform(y_encoded)
+        else:
+            return y_encoded
 
     def encode_categorical_features(self, df: pd.DataFrame, method: str = "label",
                                   target_col: Optional[str] = None, fit: bool = True) -> pd.DataFrame:

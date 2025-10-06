@@ -27,7 +27,10 @@
       "Bash(\"C:\\Users\\rodri\\AppData\\Local\\Programs\\Python\\Python312\\python.exe\" -m pip install xgboost lightgbm catboost)",
       "Bash(findstr:*)",
       "Bash(cat:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(timeout:*)",
+      "Bash(kaggle competitions list:*)",
+      "Bash(kaggle competitions files:*)"
     ],
     "deny": [],
     "ask": []

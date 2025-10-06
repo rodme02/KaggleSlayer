@@ -26,15 +26,21 @@ ENV/
 *~
 .claude/
 
+# Feature cache
+.cache/
+
+# Temporary download directory
+.temp_download/
+
 # Data files
-#competition_data/
+competition_data/
 *.csv
 *.tsv
 *.parquet
 
 # Logs and results
 *.log
-#results/
+results/
 outputs/
 
 # Model artifacts

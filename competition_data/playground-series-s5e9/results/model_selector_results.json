@@ -3,61 +3,58 @@
   "problem_type": "regression",
   "target_column": "BeatsPerMinute",
   "models_evaluated": 10,
-  "best_model_name": "ensemble_voting",
-  "best_model_score": 697.5691433461726,
+  "best_model_name": "lasso",
+  "best_model_score": 26.418159015276682,
   "best_single_model": "lasso",
-  "best_single_score": 697.1607617930331,
-  "optimized_parameters": {
-    "alpha": 0.008539771996977141,
-    "max_iter": 9588
-  },
-  "ensemble_score": 697.5691433461726,
-  "ensemble_type": "voting",
+  "best_single_score": 26.418159015276682,
+  "optimized_parameters": {},
+  "ensemble_score": null,
+  "ensemble_type": null,
   "model_comparison": [
     {
       "name": "random_forest",
-      "score": 708.3384687563822
+      "score": 26.541626196251055
     },
     {
       "name": "extra_trees",
-      "score": 706.8813987195514
+      "score": 26.54165857394739
     },
     {
       "name": "ridge",
-      "score": 699.024751396916
+      "score": 26.4355481190982
     },
     {
       "name": "lasso",
-      "score": 697.1607617930331
+      "score": 26.418159015276682
     },
     {
       "name": "elastic_net",
-      "score": 697.2131521203271
+      "score": 26.421985632767143
     },
     {
       "name": "knn",
-      "score": 810.1914625311576
+      "score": 28.403219046867658
     },
     {
       "name": "svr",
-      "score": 719.1459939247471
+      "score": 26.69141502802205
     },
     {
       "name": "xgboost",
-      "score": 789.5366843500731
+      "score": 27.751296808290906
     },
     {
       "name": "lightgbm",
-      "score": 810.1005067420463
+      "score": 27.85124684171156
     },
     {
       "name": "catboost",
-      "score": 751.9005487943521
+      "score": 26.959801735607982
     }
   ],
   "data_shape": [
-    5000,
-    20
+    15000,
+    9
   ],
-  "feature_count": 20
+  "feature_count": 9
 }

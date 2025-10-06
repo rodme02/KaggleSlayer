@@ -35,11 +35,11 @@ class ModelEvaluator:
     """Evaluates model performance using various metrics and validation strategies."""
 
     def __init__(self, cv_folds: int = 5, random_state: int = 42,
-                 classification_metric: str = 'accuracy', regression_metric: str = 'neg_mean_squared_error'):
+                 classification_metric: str = 'accuracy', regression_metric: str = 'neg_root_mean_squared_error'):
         self.cv_folds = cv_folds
         self.random_state = random_state
         self.classification_metric = classification_metric
-        self.regression_metric = regression_metric
+        self.regression_metric = regression_metric  # Using RMSE to match Kaggle competitions
 
     def evaluate_model(self, model: Any, X_train: pd.DataFrame, y_train: pd.Series,
                       X_val: Optional[pd.DataFrame] = None, y_val: Optional[pd.Series] = None,
@@ -57,17 +57,27 @@ class ModelEvaluator:
         cv_mean = np.mean(cv_scores)
         cv_std = np.std(cv_scores)
 
+        # Encode target if it's categorical (string labels)
+        from sklearn.preprocessing import LabelEncoder
+        y_train_encoded = y_train
+        y_val_encoded = y_val
+        if y_train.dtype == 'object' or y_train.dtype.name == 'category':
+            encoder = LabelEncoder()
+            y_train_encoded = pd.Series(encoder.fit_transform(y_train), index=y_train.index)
+            if y_val is not None:
+                y_val_encoded = pd.Series(encoder.transform(y_val), index=y_val.index)
+
         # Evaluate on validation set if provided
         validation_score = None
-        if X_val is not None and y_val is not None:
-            model.fit(X_train, y_train)
-            validation_score = self._score_model(model, X_val, y_val, problem_type)
+        if X_val is not None and y_val_encoded is not None:
+            model.fit(X_train, y_train_encoded)
+            validation_score = self._score_model(model, X_val, y_val_encoded, problem_type)
 
         # Calculate train score
         train_score = None
         try:
-            model.fit(X_train, y_train)
-            train_score = self._score_model(model, X_train, y_train, problem_type)
+            model.fit(X_train, y_train_encoded)
+            train_score = self._score_model(model, X_train, y_train_encoded, problem_type)
         except:
             pass
 
@@ -94,6 +104,13 @@ class ModelEvaluator:
                        problem_type: str) -> List[float]:
         """Perform cross-validation."""
         try:
+            # Encode target if it's categorical (string labels)
+            from sklearn.preprocessing import LabelEncoder
+            y_encoded = y
+            if y.dtype == 'object' or y.dtype.name == 'category':
+                encoder = LabelEncoder()
+                y_encoded = pd.Series(encoder.fit_transform(y), index=y.index)
+
             # Choose appropriate cross-validation strategy and metric
             if problem_type == "classification":
                 cv = StratifiedKFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
@@ -102,7 +119,7 @@ class ModelEvaluator:
                 cv = KFold(n_splits=self.cv_folds, shuffle=True, random_state=self.random_state)
                 scoring = self.regression_metric
 
-            scores = cross_val_score(model, X, y, cv=cv, scoring=scoring)
+            scores = cross_val_score(model, X, y_encoded, cv=cv, scoring=scoring)
 
             # Convert negative metrics to positive for consistency
             # This allows us to always use "higher is better" logic

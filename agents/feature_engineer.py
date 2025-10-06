@@ -46,7 +46,7 @@ class FeatureEngineeringPipeline(BaseEstimator, TransformerMixin):
             df = X.copy()
 
         # Generate features
-        df_generated = self.generator.generate_numerical_features(df, self.target_col)
+        df_generated = self.generator.generate_numerical_features(df, self.target_col, fit=True)
         df_generated = self.generator.generate_categorical_features(df_generated, self.target_col, fit=True)
         df_generated = self.generator.generate_statistical_features(df_generated, self.target_col)
 
@@ -76,7 +76,7 @@ class FeatureEngineeringPipeline(BaseEstimator, TransformerMixin):
         df = X.copy()
 
         # Generate features (same operations, but fit=False for categorical)
-        df_generated = self.generator.generate_numerical_features(df, self.target_col)
+        df_generated = self.generator.generate_numerical_features(df, self.target_col, fit=False)
         df_generated = self.generator.generate_categorical_features(df_generated, self.target_col, fit=False)
         df_generated = self.generator.generate_statistical_features(df_generated, self.target_col)  # FIX: use df_generated not df
 
@@ -111,8 +111,18 @@ class FeatureEngineerAgent(BaseAgent):
         self.transformer = FeatureTransformer()
 
     def run(self, save_engineered_data: bool = True) -> Dict[str, Any]:
-        """Run the complete feature engineering process."""
+        """Run the complete feature engineering process with error handling and rollback.
+
+        If feature engineering fails, attempts to load previous successful results.
+        """
         self.log_info("Starting feature engineering process...")
+
+        # Store backup of previous results for rollback
+        previous_results = None
+        try:
+            previous_results = self.load_results("feature_engineer_results.json")
+        except:
+            pass
 
         try:
             # Load cleaned data
@@ -128,14 +138,14 @@ class FeatureEngineerAgent(BaseAgent):
 
             # Generate features
             self.log_info("Generating new features...")
-            train_engineered = self.generator.generate_numerical_features(train_df, target_column)
+            train_engineered = self.generator.generate_numerical_features(train_df, target_column, fit=True)
             train_engineered = self.generator.generate_categorical_features(train_engineered, target_column, fit=True)
             train_engineered = self.generator.generate_statistical_features(train_engineered, target_column)
             # Skip polynomial features to reduce overfitting
             # train_engineered = self.generator.generate_polynomial_features(train_engineered, target_column)
 
             if test_df is not None:
-                test_engineered = self.generator.generate_numerical_features(test_df, target_column)
+                test_engineered = self.generator.generate_numerical_features(test_df, target_column, fit=False)
                 test_engineered = self.generator.generate_categorical_features(test_engineered, target_column, fit=False)
                 test_engineered = self.generator.generate_statistical_features(test_engineered, target_column)
                 # Skip polynomial features to reduce overfitting
@@ -228,7 +238,14 @@ class FeatureEngineerAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(f"Feature engineering failed: {e}")
-            raise
+
+            # Rollback: Try to use previous successful results
+            if previous_results is not None:
+                self.log_warning("Rolling back to previous successful feature engineering results")
+                return previous_results
+            else:
+                self.log_error("No previous results available for rollback")
+                raise
 
     def create_feature_pipeline(self) -> FeatureEngineeringPipeline:
         """Create a scikit-learn compatible feature engineering pipeline.

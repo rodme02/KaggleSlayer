@@ -3,51 +3,50 @@
   "problem_type": "classification",
   "target_column": "label",
   "models_evaluated": 8,
-  "best_model_name": "ensemble_stacking",
-  "best_model_score": 0.9018,
-  "best_single_model": "svm",
-  "best_single_score": 0.8986000000000001,
+  "best_model_name": "catboost",
+  "best_model_score": 0.8059285714285714,
+  "best_single_model": "catboost",
+  "best_single_score": 0.8059285714285714,
   "optimized_parameters": {},
-  "ensemble_score": 0.9018,
-  "ensemble_type": "stacking",
+  "ensemble_score": null,
+  "ensemble_type": null,
   "model_comparison": [
     {
       "name": "random_forest",
-      "score": 0.8613000000000002
+      "score": 0.7750714285714285
     },
     {
       "name": "extra_trees",
-      "score": 0.8482999999999998
+      "score": 0.7498571428571429
     },
     {
       "name": "logistic_regression",
-      "score": 0.827
+      "score": 0.6819761904761904
     },
     {
       "name": "knn",
-      "score": 0.8394999999999999
+      "score": 0.7408809523809523
     },
     {
       "name": "svm",
-      "score": 0.8986000000000001
+      "score": 0.7952619047619047
     },
     {
       "name": "xgboost",
-      "score": 0.8872
+      "score": 0.8042380952380952
     },
     {
       "name": "lightgbm",
-      "score": 0.8948
+      "score": 0.8001190476190476
     },
     {
       "name": "catboost",
-      "score": 0.8885
+      "score": 0.8059285714285714
     }
   ],
   "data_shape": [
-    10000,
-    100
+    42000,
+    784
   ],
-  "feature_count": 100,
-  "feature_importance": null
+  "feature_count": 784
 }

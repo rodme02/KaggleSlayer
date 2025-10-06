@@ -67,38 +67,89 @@ class ModelSelectorAgent(BaseAgent):
                 raise ValueError("Target column not found")
 
             # Prepare data
-            X = train_df.drop(columns=[target_column])
-            y = train_df[target_column]
+            X_full = train_df.drop(columns=[target_column])
+            y_full = train_df[target_column]
 
-            # Adaptive sampling based on dataset size (for faster initial evaluation)
-            original_size = len(X)
-            if original_size < 10000:
-                sample_size = original_size  # No sampling for small datasets
-            elif original_size < 100000:
-                sample_size = min(10000, original_size)  # Sample to 10K
+            # Encode target if it's categorical (string labels)
+            from sklearn.preprocessing import LabelEncoder
+            target_encoder = None
+            if y_full.dtype == 'object' or y_full.dtype.name == 'category':
+                target_encoder = LabelEncoder()
+                y_full_encoded = pd.Series(target_encoder.fit_transform(y_full), index=y_full.index, name=y_full.name)
+                print(f"Encoded target labels: {list(target_encoder.classes_)} -> {list(range(len(target_encoder.classes_)))}")
             else:
-                sample_size = min(5000, original_size)  # Sample to 5K for very large datasets
+                y_full_encoded = y_full
 
-            if len(X) > sample_size:
-                self.log_info(f"Sampling {sample_size} rows from {original_size} for faster evaluation")
+            # Smart sampling for large datasets (>50K rows)
+            # Uses STRATIFIED sampling to preserve class distribution
+            # NOTE: We keep X_full and y_full_encoded for final training
+            original_size = len(X_full)
+            X = X_full  # Start with full dataset
+            y = y_full_encoded  # Use encoded version
+
+            if original_size > 50000:
+                # For very large datasets, sample to make CV feasible
+                # Use stratified sampling to preserve distribution
                 from sklearn.model_selection import train_test_split
+
+                # Adaptive sample size based on dataset size
+                # For very large datasets (>200K), use smaller samples for speed
+                import math
+                if original_size > 200000:
+                    sample_size = 15000  # 15K for very large datasets
+                elif original_size > 100000:
+                    sample_size = 20000  # 20K for large datasets
+                else:
+                    sample_size = min(30000, int(math.sqrt(original_size) * 100))
+                sample_size = max(10000, sample_size)  # At least 10K
+
+                self.log_info(f"Large dataset detected ({original_size} samples)")
+                self.log_info(f"Using stratified sample of {sample_size} for model evaluation")
+
                 try:
                     # Try stratified sampling for classification
                     if y.nunique() < 20:
-                        X, _, y, _ = train_test_split(X, y, train_size=sample_size,
-                                                    random_state=self.get_config("pipeline.cv_random_state", 42),
-                                                    stratify=y)
+                        X, _, y, _ = train_test_split(
+                            X, y,
+                            train_size=sample_size,
+                            random_state=self.get_config("pipeline.cv_random_state", 42),
+                            stratify=y
+                        )
                     else:
-                        X, _, y, _ = train_test_split(X, y, train_size=sample_size,
-                                                    random_state=self.get_config("pipeline.cv_random_state", 42))
+                        # For regression, use simple random sampling
+                        X, _, y, _ = train_test_split(
+                            X, y,
+                            train_size=sample_size,
+                            random_state=self.get_config("pipeline.cv_random_state", 42)
+                        )
+                    self.log_info(f"Stratified sampling successful: {len(X)} samples")
                 except Exception as e:
-                    self.log_warning(f"Stratified sampling failed, using random sampling: {e}")
-                    X, _, y, _ = train_test_split(X, y, train_size=sample_size,
-                                                random_state=self.get_config("pipeline.cv_random_state", 42))
+                    # Fallback to random sampling if stratification fails
+                    self.log_warning(f"Stratified sampling failed ({e}), using random sample")
+                    X, _, y, _ = train_test_split(
+                        X, y,
+                        train_size=sample_size,
+                        random_state=self.get_config("pipeline.cv_random_state", 42)
+                    )
+            else:
+                self.log_info(f"Using full dataset ({original_size} samples) for model evaluation")
 
             # Determine problem type
             problem_type = "classification" if y.nunique() < 20 else "regression"
             self.log_info(f"Detected problem type: {problem_type}")
+
+            # Adaptive CV folds based on dataset size
+            # Larger datasets can use fewer folds for faster evaluation
+            if original_size > 100000:
+                cv_folds = 3  # 3-fold CV for very large datasets
+            elif original_size > 50000:
+                cv_folds = 3  # 3-fold CV for large datasets
+            else:
+                cv_folds = self.get_config("pipeline.cv_folds", 5)  # Default 5-fold
+
+            if cv_folds != self.evaluator.cv_folds:
+                self.log_info(f"Using {cv_folds}-fold CV (adapted for dataset size)")
+                self.evaluator.cv_folds = cv_folds
 
             # Create feature pipeline if using leak-free CV
             if use_feature_pipeline:
@@ -115,48 +166,119 @@ class ModelSelectorAgent(BaseAgent):
 
             # Get available models
             available_models = self.model_factory.get_available_model_names(problem_type)
-            self.log_info(f"Available models: {available_models}")
 
-            # Evaluate models with clean output
+            # Print evaluation setup
+            print(f"\n[>>] Model Evaluation Setup:")
+            print(f"    Problem type: {problem_type}")
+            print(f"    Dataset size: {len(X):,} samples x {len(X.columns)} features")
+            if original_size > len(X):
+                print(f"    (Sampled from {original_size:,} for faster CV)")
+            print(f"    CV strategy: {cv_folds}-fold cross-validation")
+            print(f"    Models to evaluate: {len(available_models)}")
+            print(f"    Parallel jobs: {-1 if len(available_models) > 1 else 1} (all cores)")
+            if use_feature_pipeline:
+                print(f"    Feature engineering: Inside CV folds (leak-free)")
+            print()
+
+            # Evaluate models with parallel processing
             model_results = []
-            print()  # Empty line for readability
-            for i, model_name in enumerate(available_models, 1):
-                try:
-                    # Show progress
-                    print(f"  [{i}/{len(available_models)}] Evaluating {model_name}...", end=' ', flush=True)
 
-                    # Create model with default parameters
-                    model = self.model_factory.create_model(model_name, problem_type=problem_type)
+            # Parallel evaluation helper function
+            def evaluate_single_model(i, model_name):
+                """Evaluate a single model - used for parallel processing."""
+                import time
+                start_time = time.time()
 
-                    # CRITICAL: If using feature pipeline, wrap model in a full pipeline
-                    if feature_pipeline is not None:
-                        from sklearn.pipeline import Pipeline
-                        full_pipeline = Pipeline([
-                            ('features', feature_pipeline),
-                            ('model', model)
-                        ])
-                    else:
-                        full_pipeline = model
+                # Suppress logs at the start of this function for each thread
+                if use_feature_pipeline:
+                    from utils.logging import suppress_feature_logs
+                    import contextlib
 
-                    # Evaluate with suppressed feature engineering logs during CV
-                    if use_feature_pipeline:
-                        from utils.logging import suppress_feature_logs
+                    # Use context manager for entire evaluation
+                    @contextlib.contextmanager
+                    def evaluation_context():
                         with suppress_feature_logs():
-                            eval_result = self.evaluator.evaluate_model(
-                                full_pipeline, X, y, problem_type=problem_type, model_name=model_name
+                            yield
+                else:
+                    import contextlib
+                    @contextlib.contextmanager
+                    def evaluation_context():
+                        yield
+
+                try:
+                    with evaluation_context():
+                        # Create model with default parameters
+                        model = self.model_factory.create_model(model_name, problem_type=problem_type)
+
+                        # CRITICAL: If using feature pipeline, wrap model in a full pipeline
+                        if feature_pipeline is not None:
+                            from sklearn.pipeline import Pipeline
+                            # Create a fresh feature pipeline for this model
+                            from .feature_engineer import FeatureEngineerAgent
+                            feature_engineer = FeatureEngineerAgent(
+                                self.competition_name,
+                                self.competition_path,
+                                self.config
                             )
-                    else:
+                            model_feature_pipeline = feature_engineer.create_feature_pipeline()
+                            full_pipeline = Pipeline([
+                                ('features', model_feature_pipeline),
+                                ('model', model)
+                            ])
+                        else:
+                            full_pipeline = model
+
+                        # Evaluate model with timeout check
                         eval_result = self.evaluator.evaluate_model(
                             full_pipeline, X, y, problem_type=problem_type, model_name=model_name
                         )
 
-                    model_results.append((model_name, full_pipeline, eval_result.cv_mean))
-                    print(f"CV: {eval_result.cv_mean:.4f}")
+                        elapsed = time.time() - start_time
+                        return (model_name, full_pipeline, eval_result.cv_mean, None, elapsed)
 
+                except KeyboardInterrupt:
+                    # User interrupted - propagate it
+                    raise
                 except Exception as e:
-                    print(f"FAILED")
-                    self.log_warning(f"  Error: {e}")
-                    continue
+                    elapsed = time.time() - start_time
+                    return (model_name, None, None, str(e), elapsed)
+
+            # Run evaluations in parallel (speeds up evaluation significantly)
+            print(f"[>>] Evaluating {len(available_models)} models in parallel...")
+            print(f"    (This may take a few minutes)\n")
+
+            from joblib import Parallel, delayed
+            import time
+            eval_start = time.time()
+
+            parallel_results = Parallel(n_jobs=-1, backend='threading', verbose=0)(
+                delayed(evaluate_single_model)(i, model_name)
+                for i, model_name in enumerate(available_models, 1)
+            )
+
+            eval_total_time = time.time() - eval_start
+
+            # Process results and display
+            print(f"[>>] Model Evaluation Results:")
+            print(f"    {'-'*60}")
+            for i, result in enumerate(parallel_results, 1):
+                # Unpack result (may have 4 or 5 elements depending on success)
+                if len(result) == 5:
+                    model_name, full_pipeline, cv_mean, error, elapsed = result
+                else:
+                    # Fallback for old format
+                    model_name, full_pipeline, cv_mean, error = result
+                    elapsed = 0
+
+                if error is None:
+                    model_results.append((model_name, full_pipeline, cv_mean))
+                    print(f"    [{i}/{len(available_models)}] {model_name:<25} CV = {cv_mean:.4f}  ({elapsed:.1f}s)")
+                else:
+                    print(f"    [{i}/{len(available_models)}] {model_name:<25} FAILED - {error}")
+                    self.log_warning(f"  Error: {error}")
+
+            print(f"    {'-'*60}")
+            print(f"    Total evaluation time: {eval_total_time:.1f}s\n")
 
             if not model_results:
                 raise ValueError("No models could be evaluated successfully")
@@ -282,11 +404,14 @@ class ModelSelectorAgent(BaseAgent):
                 else:
                     self.log_info(f"Using single model for predictions (score: {best_score:.4f} >= {ensemble_score:.4f})")
 
-            # Fit final model on full training data if using feature pipeline
+            # Fit final model on FULL training data (not sampled)
             if use_feature_pipeline and final_model is not None:
-                self.log_info("Fitting final pipeline on full training data...")
-                final_model.fit(X, y)
-                self.log_info("Final pipeline fitted successfully")
+                if original_size > 50000:
+                    self.log_info(f"Fitting final pipeline on FULL dataset ({original_size} samples)...")
+                else:
+                    self.log_info("Fitting final pipeline on full training data...")
+                final_model.fit(X_full, y_full_encoded)
+                self.log_info("Final pipeline fitted successfully on full dataset")
 
             # Save the final model (ensemble or best single)
             if final_model is not None:
@@ -299,6 +424,12 @@ class ModelSelectorAgent(BaseAgent):
                     # Also save under a generic name for easy loading
                     generic_path = self.file_manager.get_file_path("best_model.pkl")
                     joblib.dump(final_model, generic_path)
+
+                    # Save target encoder if we encoded the labels
+                    if target_encoder is not None:
+                        encoder_path = self.file_manager.get_file_path("target_encoder.pkl")
+                        joblib.dump(target_encoder, encoder_path)
+                        self.log_info(f"Saved target encoder to {encoder_path}")
                 except Exception as e:
                     self.log_warning(f"Could not save model: {e}")
 
@@ -331,6 +462,24 @@ class ModelSelectorAgent(BaseAgent):
 
         except Exception as e:
             self.log_error(f"Model selection failed: {e}")
+
+            # Try to provide partial results if any models were evaluated
+            if len(model_results) > 0:
+                self.log_warning(f"Partial success: {len(model_results)} models evaluated before failure")
+                # Return partial results
+                best_model_name, best_model, best_score = max(model_results, key=lambda x: x[2]) if problem_type == "classification" else min(model_results, key=lambda x: x[2])
+                partial_results = {
+                    'competition_name': self.competition_name,
+                    'problem_type': problem_type,
+                    'models_evaluated': len(model_results),
+                    'best_model_name': best_model_name,
+                    'best_model_score': best_score,
+                    'partial_results': True,
+                    'error': str(e)
+                }
+                self.save_results(partial_results, "model_selector_results.json")
+                return partial_results
+
             raise
 
     def _load_engineered_data(self) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
