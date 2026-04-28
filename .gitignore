@@ -67,6 +67,18 @@ notebook.ipynb
 htmlcov/
 .tox/
 
+# Ruff
+.ruff_cache/
+
+# Claude Code session artifacts
+.claude-init.log
+
+# MLflow local store
+mlruns/
+
+# Streamlit cache
+.streamlit/
+
 # System files
 .DS_Store
 Thumbs.db

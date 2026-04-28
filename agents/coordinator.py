@@ -12,6 +12,7 @@ from .feature_engineer import FeatureEngineerAgent
 from .model_selector import ModelSelectorAgent
 from utils.config import ConfigManager
 from utils.kaggle_api import KaggleAPIClient
+from utils import tracking
 
 
 class PipelineCoordinator(BaseAgent):
@@ -85,6 +86,17 @@ class PipelineCoordinator(BaseAgent):
         try:
             import time
             start_time = time.time()
+
+            tracking_cm = tracking.start_run(self.competition_name)
+            tracking_cm.__enter__()
+            tracking.log_params(
+                {
+                    "competition": self.competition_name,
+                    "cv_folds": self.get_config("pipeline.cv_folds", 5),
+                    "optuna_trials": self.get_config("pipeline.optuna_trials", 20),
+                    "max_features_to_create": self.get_config("pipeline.max_features_to_create", 25),
+                }
+            )
 
             # Step 1: Data Scouting
             print(f"\n{'='*70}")
@@ -169,6 +181,30 @@ class PipelineCoordinator(BaseAgent):
 
             self.file_manager.save_results(pipeline_results, "pipeline_results.json")
 
+            # MLflow: log metrics, tags, and artifacts for this run
+            tracking.log_metrics(
+                {
+                    "cv_score": pipeline_results["final_score"],
+                    "duration_seconds": total_time,
+                    "models_evaluated": model_results.get("models_evaluated", 0) or 0,
+                }
+            )
+            tracking.set_tags(
+                {
+                    "best_model": pipeline_results["best_model"],
+                    "problem_type": model_results.get("problem_type", "unknown"),
+                    "status": "completed",
+                }
+            )
+            for artifact in (
+                self.file_manager.get_file_path("pipeline_results.json"),
+                self.file_manager.get_file_path("model_selector_results.json"),
+                self.file_manager.get_file_path("best_model.pkl"),
+                self.file_manager.get_file_path("submission.csv"),
+            ):
+                tracking.log_artifact(artifact)
+            tracking_cm.__exit__(None, None, None)
+
             # Print final summary
             print(f"\n{'='*70}")
             print("  PIPELINE COMPLETED SUCCESSFULLY!")
@@ -186,6 +222,11 @@ class PipelineCoordinator(BaseAgent):
             self.log_error(f"Pipeline failed: {e}")
             pipeline_results['pipeline_status'] = 'failed'
             pipeline_results['error'] = str(e)
+            try:
+                tracking.set_tags({"status": "failed", "error": str(e)[:250]})
+                tracking_cm.__exit__(type(e), e, e.__traceback__)
+            except Exception:
+                pass
             raise
 
     def create_submission(self) -> Optional[pd.DataFrame]:

@@ -1,196 +1,143 @@
-"""
-KaggleSlayer - Simple AutoML Pipeline for Kaggle Competitions
+"""KaggleSlayer — AutoML pipeline CLI for tabular Kaggle competitions.
 
 Usage:
-    # Single competition
-    python kaggle_slayer.py <competition_name> --data-path <path_to_data>
-
-    # All competitions
-    python kaggle_slayer.py --all
-
-Examples:
-    python kaggle_slayer.py titanic --data-path competition_data/titanic
-    python kaggle_slayer.py --all --submit
+    kaggle-slayer <competition> --data-path <path>
+    kaggle-slayer <competition> --data-path <path> --submit
+    kaggle-slayer --all [--submit] [--yes]
 """
 
+from __future__ import annotations
+
 import argparse
+import sys
 import warnings
 from pathlib import Path
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
 from agents.coordinator import PipelineCoordinator
 
-# Suppress sklearn deprecation warnings for CatBoost compatibility
-warnings.filterwarnings('ignore', category=DeprecationWarning, module='sklearn')
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="sklearn")
+
+console = Console()
 
 
-def get_all_competitions():
-    """Get list of all downloaded competitions."""
-    competition_data_dir = Path("competition_data")
-
-    if not competition_data_dir.exists():
+def get_all_competitions() -> list[str]:
+    root = Path("competition_data")
+    if not root.exists():
         return []
-
-    competitions = []
-    for comp_dir in competition_data_dir.iterdir():
-        if comp_dir.is_dir():
-            # Check if it has raw data
-            raw_dir = comp_dir / "raw"
-            if raw_dir.exists() and (raw_dir / "train.csv").exists():
-                competitions.append(comp_dir.name)
-
-    return sorted(competitions)
+    return sorted(
+        d.name
+        for d in root.iterdir()
+        if d.is_dir() and (d / "raw" / "train.csv").exists()
+    )
 
 
-def run_single_competition(competition_name, data_path, submit_to_kaggle=False):
-    """Run pipeline for a single competition."""
-    print(f"\n{'='*60}")
-    print(f"  KaggleSlayer - Running pipeline for: {competition_name}")
-    print(f"{'='*60}\n")
+def run_single(name: str, data_path: Path, submit: bool) -> dict:
+    console.rule(f"[bold cyan]KaggleSlayer · {name}")
+    coord = PipelineCoordinator(name, data_path)
+    results = coord.run(submit_to_kaggle=submit)
 
-    coordinator = PipelineCoordinator(competition_name, Path(data_path))
-    results = coordinator.run(submit_to_kaggle=submit_to_kaggle)
-
-    print(f"\n{'='*60}")
-    print(f"  Pipeline Complete!")
-    print(f"  Best Model: {results.get('best_model', 'N/A')}")
-    print(f"  CV Score: {results.get('final_score', 0):.4f}")
-    print(f"  Submission saved to: {data_path}/submission.csv")
-    print(f"{'='*60}\n")
-
+    panel = Panel.fit(
+        f"[bold]Best model:[/] {results.get('best_model', 'N/A')}\n"
+        f"[bold]CV score:[/] {results.get('final_score', 0):.4f}\n"
+        f"[bold]Submission:[/] {data_path}/submission.csv",
+        title="Pipeline complete",
+        border_style="green",
+    )
+    console.print(panel)
     return results
 
 
-def run_all_competitions(submit_to_kaggle=False):
-    """Run pipeline for all downloaded competitions."""
-    competitions = get_all_competitions()
-
-    if not competitions:
-        print("\n[!] No competitions found in competition_data/")
-        print("    Run: python download_all_competitions.py")
+def run_all(submit: bool, yes: bool) -> None:
+    comps = get_all_competitions()
+    if not comps:
+        console.print("[yellow]No competitions found in competition_data/.[/]")
+        console.print("Run: [bold]python scripts/download_all_competitions.py[/]")
         return
 
-    print(f"\n{'='*70}")
-    print(f"  KaggleSlayer - Running pipeline for ALL competitions")
-    print(f"{'='*70}")
-    print(f"\nFound {len(competitions)} competitions:")
-    for i, comp in enumerate(competitions, 1):
-        print(f"  {i}. {comp}")
+    console.rule("[bold cyan]KaggleSlayer · batch mode")
+    console.print(f"Found [bold]{len(comps)}[/] competitions:")
+    for i, c in enumerate(comps, 1):
+        console.print(f"  {i:>2}. {c}")
 
-    # Ask for confirmation
-    response = input(f"\nRun pipeline for all {len(competitions)} competitions? (y/N): ").strip().lower()
-    if response != 'y':
-        print("\n[!] Cancelled")
-        return
+    if not yes:
+        ans = console.input(f"\nRun pipeline for all {len(comps)}? [y/N]: ").strip().lower()
+        if ans != "y":
+            console.print("[yellow]Cancelled.[/]")
+            return
 
-    # Run pipeline for each competition
-    all_results = []
-    successful = []
-    failed = []
-
-    print(f"\n{'='*70}")
-    print(f"  Starting batch pipeline execution...")
-    print(f"{'='*70}\n")
-
-    for i, comp_name in enumerate(competitions, 1):
-        print(f"\n{'#'*70}")
-        print(f"  [{i}/{len(competitions)}] Processing: {comp_name}")
-        print(f"{'#'*70}")
-
+    summary = []
+    for i, c in enumerate(comps, 1):
+        console.rule(f"[{i}/{len(comps)}] {c}")
         try:
-            data_path = Path("competition_data") / comp_name
-            results = run_single_competition(comp_name, data_path, submit_to_kaggle)
-
-            all_results.append({
-                'competition': comp_name,
-                'best_model': results.get('best_model', 'N/A'),
-                'cv_score': results.get('final_score', 0),
-                'status': 'success'
-            })
-            successful.append(comp_name)
-
+            results = run_single(c, Path("competition_data") / c, submit)
+            summary.append(
+                {
+                    "competition": c,
+                    "best_model": results.get("best_model", "N/A"),
+                    "cv_score": results.get("final_score", 0),
+                    "status": "ok",
+                }
+            )
         except KeyboardInterrupt:
-            print(f"\n\n[!] Batch execution interrupted by user")
-            failed.append(comp_name)
+            console.print("\n[yellow]Interrupted.[/]")
             break
-        except Exception as e:
-            print(f"\n[X] Error processing {comp_name}: {e}")
-            all_results.append({
-                'competition': comp_name,
-                'status': 'failed',
-                'error': str(e)
-            })
-            failed.append(comp_name)
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[red]Error processing {c}: {e}[/]")
+            summary.append({"competition": c, "status": "failed", "error": str(e)})
 
-    # Final summary
-    print(f"\n{'='*70}")
-    print(f"  BATCH EXECUTION SUMMARY")
-    print(f"{'='*70}")
-    print(f"\nTotal competitions: {len(competitions)}")
-    print(f"Successful: {len(successful)}")
-    print(f"Failed: {len(failed)}")
-
-    if successful:
-        print(f"\n[OK] Successful ({len(successful)}):")
-        print(f"\n{'Competition':<40} {'Model':<20} {'CV Score':<10}")
-        print(f"{'-'*40} {'-'*20} {'-'*10}")
-        for result in all_results:
-            if result['status'] == 'success':
-                comp = result['competition']
-                model = result['best_model']
-                score = result['cv_score']
-                print(f"{comp:<40} {model:<20} {score:<10.4f}")
-
-    if failed:
-        print(f"\n[X] Failed ({len(failed)}):")
-        for comp in failed:
-            print(f"  - {comp}")
-
-    print(f"\n{'='*70}")
-    print(f"  All pipelines complete!")
-    print(f"{'='*70}\n")
+    _print_summary(summary)
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="KaggleSlayer - AutoML for Kaggle Competitions",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run single competition
-  python kaggle_slayer.py titanic --data-path competition_data/titanic
+def _print_summary(summary: list[dict]) -> None:
+    table = Table(title="Batch summary", show_lines=False)
+    table.add_column("Competition", style="cyan")
+    table.add_column("Status")
+    table.add_column("Best model")
+    table.add_column("CV", justify="right")
+    for r in summary:
+        if r.get("status") == "ok":
+            table.add_row(
+                r["competition"],
+                "[green]ok[/]",
+                r.get("best_model", "—"),
+                f"{r['cv_score']:.4f}",
+            )
+        else:
+            table.add_row(
+                r["competition"],
+                "[red]failed[/]",
+                "—",
+                r.get("error", "")[:40],
+            )
+    console.print(table)
 
-  # Run all downloaded competitions
-  python kaggle_slayer.py --all
 
-  # Run all and submit to Kaggle
-  python kaggle_slayer.py --all --submit
-        """
+def main() -> None:
+    p = argparse.ArgumentParser(
+        prog="kaggle-slayer",
+        description="AutoML pipeline for tabular Kaggle competitions.",
     )
+    p.add_argument("competition", nargs="?", help="Competition name (omit when using --all)")
+    p.add_argument("--data-path", help="Path to competition data directory")
+    p.add_argument("--submit", action="store_true", help="Submit to Kaggle after creating the submission file")
+    p.add_argument("--all", action="store_true", help="Run pipeline for every downloaded competition")
+    p.add_argument("--yes", action="store_true", help="Non-interactive: auto-confirm batch runs")
+    args = p.parse_args()
 
-    parser.add_argument("competition", nargs="?", help="Competition name (required unless using --all)")
-    parser.add_argument("--data-path", help="Path to competition data directory")
-    parser.add_argument("--submit", action="store_true", help="Submit to Kaggle after creating submission file")
-    parser.add_argument("--all", action="store_true", help="Run pipeline for all downloaded competitions")
-
-    args = parser.parse_args()
-
-    # Handle --all flag
     if args.all:
-        run_all_competitions(submit_to_kaggle=args.submit)
+        run_all(submit=args.submit, yes=args.yes)
         return
 
-    # Single competition mode - require competition name and data path
-    if not args.competition:
-        parser.print_help()
-        print("\n[X] Error: Competition name required (or use --all)")
-        return
+    if not args.competition or not args.data_path:
+        p.print_help()
+        console.print("\n[red]Error:[/] competition name and --data-path are required (or use --all).")
+        sys.exit(2)
 
-    if not args.data_path:
-        parser.print_help()
-        print("\n[X] Error: --data-path required for single competition mode")
-        return
-
-    # Run single competition
-    run_single_competition(args.competition, args.data_path, args.submit)
+    run_single(args.competition, Path(args.data_path), submit=args.submit)
 
 
 if __name__ == "__main__":
