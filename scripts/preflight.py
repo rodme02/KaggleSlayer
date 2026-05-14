@@ -8,7 +8,12 @@ This script is the seed of the future health-check telemetry (spec §11.2).
 
 Credential sources accepted:
   - Gemini: GEMINI_API_KEY or GOOGLE_API_KEY (env or .env)
-  - Kaggle: ~/.kaggle/kaggle.json  OR  KAGGLE_USERNAME + KAGGLE_KEY (env or .env)
+  - Kaggle (new format, v2.1+):
+        KAGGLE_API_TOKEN env var       (preferred for .env workflows)
+        ~/.kaggle/access_token file
+  - Kaggle (legacy format, pre-v2):
+        KAGGLE_USERNAME + KAGGLE_KEY env vars
+        ~/.kaggle/kaggle.json file
 """
 
 from __future__ import annotations
@@ -31,32 +36,45 @@ DOTENV_LOADED = load_dotenv(DOTENV_PATH)
 console = Console()
 
 KAGGLE_JSON = Path.home() / ".kaggle" / "kaggle.json"
+KAGGLE_ACCESS_TOKEN_FILE = Path.home() / ".kaggle" / "access_token"
+
+
+def _check_file_mode(path: Path) -> tuple[bool, str]:
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & 0o077:
+        return False, (
+            f"{path} is world/group readable (mode {oct(mode)})\n"
+            f"  → Fix: chmod 600 {path}"
+        )
+    return True, f"{path} (mode {oct(mode)})"
 
 
 def check_kaggle_credentials() -> tuple[bool, str]:
-    """Either ~/.kaggle/kaggle.json (file) or KAGGLE_USERNAME+KAGGLE_KEY (env)."""
+    """Accept any of: KAGGLE_API_TOKEN (new), ~/.kaggle/access_token (new),
+    KAGGLE_USERNAME+KAGGLE_KEY (legacy), ~/.kaggle/kaggle.json (legacy)."""
+    if token := os.environ.get("KAGGLE_API_TOKEN"):
+        return True, f"using env var KAGGLE_API_TOKEN (len {len(token)})"
+
+    if KAGGLE_ACCESS_TOKEN_FILE.exists():
+        return _check_file_mode(KAGGLE_ACCESS_TOKEN_FILE)
+
     env_user = os.environ.get("KAGGLE_USERNAME")
     env_key = os.environ.get("KAGGLE_KEY")
     if env_user and env_key:
-        return True, f"using env vars KAGGLE_USERNAME='{env_user}', KAGGLE_KEY (len {len(env_key)})"
+        return True, f"using legacy env vars KAGGLE_USERNAME='{env_user}', KAGGLE_KEY (len {len(env_key)})"
 
     if KAGGLE_JSON.exists():
-        mode = stat.S_IMODE(KAGGLE_JSON.stat().st_mode)
-        if mode & 0o077:
-            return False, (
-                f"{KAGGLE_JSON} is world/group readable (mode {oct(mode)})\n"
-                "  → Fix: chmod 600 ~/.kaggle/kaggle.json"
-            )
-        return True, f"using {KAGGLE_JSON} (mode {oct(mode)})"
+        return _check_file_mode(KAGGLE_JSON)
 
     return False, (
         "no Kaggle credentials found.\n"
-        "  → Option A — env vars in .env:\n"
-        "      KAGGLE_USERNAME=your_username\n"
-        "      KAGGLE_KEY=the_long_alphanumeric_key_from_kaggle.json\n"
-        "  → Option B — credential file:\n"
-        "      mkdir -p ~/.kaggle && mv ~/Downloads/kaggle.json ~/.kaggle/\n"
-        "      chmod 600 ~/.kaggle/kaggle.json\n"
+        "  → Option A (recommended, new format) — single env var in .env:\n"
+        "      KAGGLE_API_TOKEN=KGAT_...        (paste the whole token from kaggle.com)\n"
+        "  → Option B — new-format file:\n"
+        "      mkdir -p ~/.kaggle && echo 'KGAT_...' > ~/.kaggle/access_token\n"
+        "      chmod 600 ~/.kaggle/access_token\n"
+        "  → Option C (legacy) — split env vars:  KAGGLE_USERNAME + KAGGLE_KEY\n"
+        "  → Option D (legacy) — ~/.kaggle/kaggle.json with {username, key} JSON\n"
         "  (Get the token from https://www.kaggle.com/settings → API → 'Create New API Token')"
     )
 
@@ -67,12 +85,18 @@ def check_kaggle_api_call() -> tuple[bool, str]:
         from kaggle import api  # type: ignore[import-untyped]
 
         api.authenticate()
-        comps = api.competitions_list(page=1)
+        resp = api.competitions_list(page=1)
     except Exception as e:  # noqa: BLE001
         return False, f"Kaggle API call failed: {e!r}"
+
+    # kaggle>=2.x returns an ApiListCompetitionsResponse with .competitions list;
+    # older versions returned a plain list.
+    comps = getattr(resp, "competitions", resp)
     if not comps:
         return False, "Kaggle API returned an empty competition list (unexpected)"
-    return True, f"listed {len(comps)} competitions (first: '{comps[0].ref}')"
+    first = comps[0]
+    ref = getattr(first, "ref", None) or getattr(first, "url", None) or str(first)[:60]
+    return True, f"listed {len(comps)} competitions (first: '{ref}')"
 
 
 def check_gemini_env_var() -> tuple[bool, str]:
