@@ -90,11 +90,28 @@ def _messages_to_genai_contents(messages: list[Message]) -> str:
     return "\n\n".join(parts)
 
 
+_TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({408, 429, 500, 502, 503, 504})
+_TRANSIENT_KEYWORDS: tuple[str, ...] = (
+    "rate limit",
+    "temporarily unavailable",
+    "connection timeout",
+    "connection reset",
+    "deadline exceeded",
+)
+
+
 def _is_transient(err: Exception) -> bool:
     if isinstance(err, TransientLLMError):
         return True
+    # Prefer a structured status_code attribute when the SDK provides one.
+    status = getattr(err, "status_code", None)
+    if isinstance(status, int):
+        return status in _TRANSIENT_STATUS_CODES
+    # Fall back to keyword detection on the error message. Word-anchored so a
+    # model name like "gemini-503-test" embedded in a permanent error does not
+    # trigger a retry.
     msg = str(err).lower()
-    return any(s in msg for s in ("rate limit", "timeout", "temporarily", "503", "429", "500", "502", "504"))
+    return any(kw in msg for kw in _TRANSIENT_KEYWORDS)
 
 
 class GeminiClient:

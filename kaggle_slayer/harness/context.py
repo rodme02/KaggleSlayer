@@ -27,14 +27,23 @@ class _KaggleClientLike(Protocol):
     def get_leaderboard(self, name: str, *, top_n: int = 10) -> list[LBEntry]: ...
 
 
-# Common target column names we'll surface as a hint to the agent. The agent
-# remains responsible for confirming the actual target.
-_TARGET_HINTS: tuple[str, ...] = (
-    "target", "Target", "TARGET",
-    "label", "Label", "LABEL",
-    "y",
-    "Survived", "SalePrice", "Class", "outcome",
-)
+# Common target column patterns. Match is case-insensitive against the column
+# name lowercased, plus suffix/prefix variants for compound names.
+_TARGET_EXACT: frozenset[str] = frozenset({
+    "target", "label", "y", "outcome", "class",
+    "survived", "saleprice",  # Kaggle staples
+})
+_TARGET_SUFFIXES: tuple[str, ...] = ("_target", "_label", "_y", "_outcome", "_class")
+_TARGET_PREFIXES: tuple[str, ...] = ("target_", "label_", "y_")
+
+
+def _looks_like_target(column_name: str) -> bool:
+    cl = column_name.lower()
+    if cl in _TARGET_EXACT:
+        return True
+    if any(cl.endswith(s) for s in _TARGET_SUFFIXES):
+        return True
+    return any(cl.startswith(p) for p in _TARGET_PREFIXES)
 
 
 def build_context(
@@ -101,7 +110,7 @@ def _data_profile(workspace: Workspace) -> str:
     except Exception as e:  # noqa: BLE001
         return f"*Could not read train.csv: {e!r}*"
 
-    target_candidates = [c for c in df.columns if c in _TARGET_HINTS]
+    target_candidates = [c for c in df.columns if _looks_like_target(c)]
 
     lines = [
         f"- **Rows (sampled, first 5000):** {len(df)}",

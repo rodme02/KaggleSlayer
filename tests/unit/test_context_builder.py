@@ -128,3 +128,38 @@ def test_build_context_overwrites_existing(workspace, kaggle_fake, sample_train_
     body = workspace.context_path.read_text()
     assert "stale content" not in body
     assert "Titanic" in body
+
+
+def test_target_hint_matches_case_insensitively(workspace, kaggle_fake, tmp_path):
+    """A column 'TARGET' or 'Target' should be flagged the same as 'target'."""
+    import pandas as pd
+
+    df = pd.DataFrame({"x1": [1, 2, 3], "Target": [0, 1, 0]})
+    df.to_csv(workspace.raw_dir / "train.csv", index=False)
+    ctx_mod.build_context(workspace=workspace, kaggle_client=kaggle_fake)
+    body = workspace.context_path.read_text().lower()
+    assert "likely target" in body
+    assert "target" in body  # the column name appears as a flagged candidate
+
+
+def test_target_hint_matches_suffix_label(workspace, kaggle_fake):
+    """A column ending in '_label' or '_target' should be flagged."""
+    import pandas as pd
+
+    df = pd.DataFrame({"x1": [1, 2, 3], "class_label": [0, 1, 0]})
+    df.to_csv(workspace.raw_dir / "train.csv", index=False)
+    ctx_mod.build_context(workspace=workspace, kaggle_client=kaggle_fake)
+    body = workspace.context_path.read_text().lower()
+    assert "likely target" in body
+    assert "class_label" in body
+
+
+def test_target_hint_no_match_says_so(workspace, kaggle_fake):
+    """If no column matches the hint patterns, context.md should say the agent must infer."""
+    import pandas as pd
+
+    df = pd.DataFrame({"x1": [1, 2, 3], "x2": [4, 5, 6], "outcome_var": [0, 1, 0]})
+    df.to_csv(workspace.raw_dir / "train.csv", index=False)
+    ctx_mod.build_context(workspace=workspace, kaggle_client=kaggle_fake)
+    body = workspace.context_path.read_text().lower()
+    assert "agent should infer" in body

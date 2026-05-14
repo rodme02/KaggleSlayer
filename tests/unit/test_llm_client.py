@@ -145,3 +145,33 @@ def test_gemini_client_does_not_retry_on_permanent_error(tmp_path):
         with pytest.raises(_AuthError):
             client.call(messages=[llm.Message(role="user", content="hi")])
     assert client_impl.models.generate_content.call_count == 1
+
+
+def test_is_transient_uses_status_code_attribute_first():
+    """If an exception has a status_code attribute, prefer it over substring matching."""
+    class HttpError(Exception):
+        def __init__(self, code):
+            super().__init__("http error")
+            self.status_code = code
+    assert llm._is_transient(HttpError(429)) is True
+    assert llm._is_transient(HttpError(503)) is True
+    assert llm._is_transient(HttpError(500)) is True
+    # 4xx other than 429 should not retry
+    assert llm._is_transient(HttpError(400)) is False
+    assert llm._is_transient(HttpError(401)) is False
+    assert llm._is_transient(HttpError(403)) is False
+    assert llm._is_transient(HttpError(404)) is False
+
+
+def test_is_transient_does_not_false_positive_on_model_name():
+    """A permanent error mentioning a model name with '503' in it must not retry."""
+    err = ValueError("model 'gemini-503-test' is not supported")
+    # No status_code attribute, no transient keyword — must be permanent
+    assert llm._is_transient(err) is False
+
+
+def test_is_transient_still_matches_keyword_when_no_status_code():
+    """Backstop substring match still works for SDKs without status codes."""
+    assert llm._is_transient(Exception("rate limit exceeded")) is True
+    assert llm._is_transient(Exception("temporarily unavailable")) is True
+    assert llm._is_transient(Exception("connection timeout")) is True
