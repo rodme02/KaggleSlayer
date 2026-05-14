@@ -196,13 +196,26 @@ def submit_local(ctx: Any, *, label: str) -> str:
 
 
 def _detect_id_column(df: pd.DataFrame) -> str | None:
-    for candidate in ("id", "Id", "ID", "PassengerId", "index"):
+    """Detect the test set's id column for the submission CSV.
+
+    F9: the old heuristic accepted any column whose name ended in 'id' —
+    matching `valid`, `covid`, `paranoid`, `bid`, etc. The new algorithm:
+
+    1. Explicit candidates first (`id`, `Id`, `ID`, `PassengerId`, `pk`,
+       `entry_id`, `row_id`).
+    2. Any column whose lowercased name equals `id`, ends in `_id`, or
+       starts with `id_` — but NOT a bare `endswith('id')` substring match.
+    3. Otherwise, None. No "first column" fallback (too dangerous).
+    """
+    explicit = ("id", "Id", "ID", "PassengerId", "pk", "entry_id", "row_id")
+    for candidate in explicit:
         if candidate in df.columns:
             return candidate
-    # Heuristic: first column whose name ends in "id"
-    first = str(df.columns[0])
-    if first.lower().endswith("id"):
-        return first
+    for col in df.columns:
+        name = str(col)
+        lname = name.lower()
+        if lname == "id" or lname.endswith("_id") or lname.startswith("id_"):
+            return name
     return None
 
 

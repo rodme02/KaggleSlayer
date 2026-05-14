@@ -277,6 +277,25 @@ def test_submit_local_requires_fe_and_model(comp_ctx):
         ml_h.submit_local(comp_ctx, label="x")
 
 
+def test_detect_id_column_does_not_match_substrings():
+    """F9: endswith('id') matched `valid`, `covid`, `paranoid`, etc.
+    The new algorithm requires the column name to *equal* 'id', end in
+    '_id', or start with 'id_'."""
+    df = pd.DataFrame({
+        "valid": [0, 1],
+        "covid": [0, 1],
+        "paranoid": [0, 1],
+        "x1": [0.1, 0.2],
+    })
+    assert ml_h._detect_id_column(df) is None
+
+
+def test_detect_id_column_matches_suffix():
+    """F9: a column with the proper `_id` suffix should still be detected."""
+    df = pd.DataFrame({"x1": [0, 1], "entry_id": [10, 20]})
+    assert ml_h._detect_id_column(df) == "entry_id"
+
+
 def test_done_sets_ctx_finished(comp_ctx):
     msg = ml_h.done(comp_ctx, summary="best cv was 0.82 with lr baseline")
     assert "0.82" in msg
