@@ -41,8 +41,10 @@ def fit_model(X_train, y_train, problem_type, metric_name):
 
 - DON'T read raw competition files directly in fe.py or model.py. The harness
   passes you everything you need.
-- DON'T touch `os.remove`, `shutil`, `subprocess`, `eval`, network calls. The
-  sandbox lint will reject your code.
+- DON'T import `os`, `shutil`, `subprocess`, or call `eval`/`exec`, or attempt
+  network or filesystem operations from inside fe.py or model.py. The harness
+  runs a static AST lint before loading your code and will reject it with a
+  clear error you can correct on the next turn.
 - DON'T write to `run_log.jsonl`, `notes.jsonl`, or `context.md` via `write_file` —
   those are protected.
 - DO use `take_note` to record observations, decisions, hypotheses, and todos.
