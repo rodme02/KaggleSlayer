@@ -52,6 +52,10 @@ def set_cv(ctx: Any, *, kind: str, n_splits: int = 5, group_col: str | None = No
     """Override the CV strategy for subsequent train_cv calls."""
     if kind not in _ALLOWED_CV_KINDS:
         raise ToolError(f"unknown CV kind {kind!r}; allowed: {sorted(_ALLOWED_CV_KINDS)}")
+    if kind == "group_kfold" and not group_col:
+        # F8: group_kfold is meaningless without a group column. Fail fast
+        # with a hint rather than letting it explode later in cv.split().
+        raise ToolError("group_kfold requires group_col=<column name>")
     ctx.cv_kind = kind
     params: dict[str, Any] = {"n_splits": n_splits}
     if group_col is not None:

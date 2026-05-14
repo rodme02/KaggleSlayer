@@ -106,6 +106,13 @@ def test_set_cv_rejects_unknown_kind(comp_ctx):
         ml_h.set_cv(comp_ctx, kind="random_split")
 
 
+def test_set_cv_group_kfold_requires_group_col(comp_ctx):
+    """F8: kind='group_kfold' is meaningless without a group column —
+    reject early with a hint instead of letting it fail at split time."""
+    with pytest.raises(ToolError, match="group_col"):
+        ml_h.set_cv(comp_ctx, kind="group_kfold", n_splits=3)
+
+
 def test_train_cv_runs_and_returns_summary(comp_ctx):
     result = ml_h.train_cv(comp_ctx)
     # Result is a string the LLM can read; should mention fold scores and mean
