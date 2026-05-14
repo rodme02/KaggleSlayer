@@ -1,0 +1,93 @@
+"""Tests for kaggle_slayer.cli."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
+
+from kaggle_slayer import cli
+
+
+def test_cli_parses_args(tmp_path):
+    """Parser accepts a workspace path and optional --target/--metric/--problem-type."""
+    args = cli._parse_args([
+        str(tmp_path / "comp"),
+        "--target", "Survived",
+        "--metric", "accuracy",
+        "--problem-type", "classification",
+        "--max-iterations", "10",
+    ])
+    assert args.workspace_path == str(tmp_path / "comp")
+    assert args.target == "Survived"
+    assert args.metric == "accuracy"
+    assert args.problem_type == "classification"
+    assert args.max_iterations == 10
+
+
+def test_cli_requires_workspace_path():
+    with pytest.raises(SystemExit):
+        cli._parse_args([])
+
+
+def test_cli_run_creates_workspace_and_calls_solver(tmp_path):
+    """run() with a fake LLMClient creates the workspace and invokes the solver."""
+    comp_path = tmp_path / "comp"
+
+    # Pre-populate raw/train.csv and raw/test.csv so the workspace looks real
+    comp_path.mkdir()
+    raw = comp_path / "raw"
+    raw.mkdir()
+    pd.DataFrame({"x1": [1, 2, 3], "Survived": [0, 1, 0]}).to_csv(raw / "train.csv", index=False)
+    pd.DataFrame({"id": [1, 2], "x1": [1, 2]}).to_csv(raw / "test.csv", index=False)
+
+    # Mock context builder and Solver to avoid real Kaggle/LLM calls
+    with patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(
+            status="done", iterations=3, summary="best CV=0.85"
+        )
+        mock_solver_cls.return_value = mock_solver
+
+        exit_code = cli.run([
+            str(comp_path),
+            "--target", "Survived",
+            "--metric", "accuracy",
+            "--problem-type", "classification",
+        ])
+
+    assert exit_code == 0
+    mock_solver_cls.assert_called_once()
+    mock_solver.solve.assert_called_once()
+    # Workspace structure was created
+    assert (comp_path / "agent").is_dir()
+    assert (comp_path / "submissions").is_dir()
+
+
+def test_cli_run_exits_nonzero_when_solver_does_not_finish(tmp_path):
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    (comp_path / "raw").mkdir()
+    pd.DataFrame({"x": [1], "y": [0]}).to_csv(comp_path / "raw" / "train.csv", index=False)
+    pd.DataFrame({"x": [1]}).to_csv(comp_path / "raw" / "test.csv", index=False)
+
+    with patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(
+            status="max_iterations", iterations=25, summary=""
+        )
+        mock_solver_cls.return_value = mock_solver
+
+        exit_code = cli.run([str(comp_path), "--target", "y"])
+    assert exit_code != 0
