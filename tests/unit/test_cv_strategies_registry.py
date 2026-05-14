@@ -63,3 +63,15 @@ def test_auto_select_regression_returns_kfold(synthetic_regression):
         problem_type="regression", train_df=train, target_col=target_col
     )
     assert cv.name == "kfold"
+
+
+def test_kfold_forwards_shuffle_kwarg():
+    cv = cv_strategies.get("kfold", n_splits=3, shuffle=False)
+    # sklearn KFold(shuffle=False) does NOT shuffle indices, so the first
+    # fold's val set should be the first ⅓ of the data in order.
+    import pandas as pd
+    df = pd.DataFrame({"x": range(30), "target": [0]*15 + [1]*15})
+    folds = list(cv.split(df, "target"))
+    val_idx = folds[0][1]
+    # Without shuffle, val indices are contiguous [0..9]
+    assert val_idx == list(range(10))

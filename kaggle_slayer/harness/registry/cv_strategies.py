@@ -41,26 +41,34 @@ class CVStrategy:
             yield list(train_idx), list(val_idx)
 
 
-def _make_kfold(n_splits: int, random_state: int | None = 42, **_: object) -> CVStrategy:
-    splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+def _make_kfold(
+    n_splits: int, random_state: int | None = 42, shuffle: bool = True
+) -> CVStrategy:
+    # sklearn requires random_state=None when shuffle=False
+    effective_random_state = random_state if shuffle else None
+    splitter = KFold(
+        n_splits=n_splits, shuffle=shuffle, random_state=effective_random_state
+    )
     return CVStrategy(
         name="kfold",
         n_splits=n_splits,
-        random_state=random_state,
+        random_state=effective_random_state,
         _splitter=splitter,
     )
 
 
 def _make_stratified_kfold(
-    n_splits: int, random_state: int | None = 42, **_: object
+    n_splits: int, random_state: int | None = 42, shuffle: bool = True
 ) -> CVStrategy:
+    # sklearn requires random_state=None when shuffle=False
+    effective_random_state = random_state if shuffle else None
     splitter = StratifiedKFold(
-        n_splits=n_splits, shuffle=True, random_state=random_state
+        n_splits=n_splits, shuffle=shuffle, random_state=effective_random_state
     )
     return CVStrategy(
         name="stratified_kfold",
         n_splits=n_splits,
-        random_state=random_state,
+        random_state=effective_random_state,
         _splitter=splitter,
     )
 
