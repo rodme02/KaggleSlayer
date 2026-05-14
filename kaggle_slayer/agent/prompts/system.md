@@ -47,7 +47,9 @@ def fit_model(X_train, y_train, problem_type, metric_name):
   clear error you can correct on the next turn.
 - DON'T write to `run_log.jsonl`, `notes.jsonl`, or `context.md` via `write_file` —
   those are protected.
-- DO use `take_note` to record observations, decisions, hypotheses, and todos.
+- DO use `take_note` to record observations (`observation`), decisions
+  (`decision`), hypotheses (`hypothesis`), and todos (`todo`). Those four
+  singular strings are the only accepted values for the `category` field.
 - DO trust the CV result — if `train_cv` says mean=0.82, the agent should believe
   that and improve on it, not re-run hoping for a different number.
 
