@@ -297,3 +297,48 @@ def test_train_cv_multi_class_proba(tmp_path):
     # logloss is finite and non-negative
     assert result.mean > 0.0
     assert np.isfinite(result.mean)
+
+
+def test_train_cv_metadata_extra_merged_into_result(
+    fe_pass_through, model_logreg, synthetic_binary
+):
+    """The caller can pass metadata_extra to enrich CVResult.metadata."""
+    train, target_col = synthetic_binary
+    cv = cv_strategies.get("stratified_kfold", n_splits=3)
+    metric = metrics.get("accuracy")
+    result = cv_mod.train_cv(
+        fe_path=fe_pass_through,
+        model_path=model_logreg,
+        train_df=train,
+        target_col=target_col,
+        cv=cv,
+        metric=metric,
+        metadata_extra={"fe_version": "v07", "agent_decision_id": "abc123"},
+    )
+    assert result.metadata["fe_version"] == "v07"
+    assert result.metadata["agent_decision_id"] == "abc123"
+    # Built-in metadata still present
+    assert result.metadata["cv_strategy"] == "stratified_kfold"
+    assert result.metadata["metric"] == "accuracy"
+
+
+def test_train_cv_metadata_extra_does_not_overwrite_builtin(
+    fe_pass_through, model_logreg, synthetic_binary
+):
+    """metadata_extra cannot clobber the harness-owned keys."""
+    train, target_col = synthetic_binary
+    cv = cv_strategies.get("stratified_kfold", n_splits=3)
+    metric = metrics.get("accuracy")
+    result = cv_mod.train_cv(
+        fe_path=fe_pass_through,
+        model_path=model_logreg,
+        train_df=train,
+        target_col=target_col,
+        cv=cv,
+        metric=metric,
+        metadata_extra={"cv_strategy": "evil_override", "fe_version": "v08"},
+    )
+    # Harness-owned key preserved
+    assert result.metadata["cv_strategy"] == "stratified_kfold"
+    # User-owned key accepted
+    assert result.metadata["fe_version"] == "v08"

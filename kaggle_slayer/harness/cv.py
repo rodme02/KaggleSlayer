@@ -78,6 +78,7 @@ def train_cv(
     target_col: str,
     cv: CVStrategy,
     metric: Metric,
+    metadata_extra: dict[str, Any] | None = None,
 ) -> CVResult:
     """Run leak-free K-fold CV using the agent's fe.py and model.py.
 
@@ -88,6 +89,8 @@ def train_cv(
         target_col: Name of the target column.
         cv: CV strategy from `cv_strategies.get(...)`.
         metric: Metric from `metrics.get(...)`.
+        metadata_extra: Optional dict of extra metadata to merge into CVResult.metadata.
+            Cannot clobber harness-owned keys (cv_strategy, n_splits, metric, problem_type).
 
     Returns:
         CVResult with per-fold scores, mean, std, OOF predictions, and timing.
@@ -174,16 +177,22 @@ def train_cv(
         fold_scores.append(metric.score(y_val, preds))
 
     duration_s = time.perf_counter() - started
+
+    built_in_metadata = {
+        "cv_strategy": cv.name,
+        "n_splits": cv.n_splits,
+        "metric": metric.name,
+        "problem_type": problem_type,
+    }
+    # metadata_extra cannot clobber built-in keys
+    extra = {k: v for k, v in (metadata_extra or {}).items() if k not in built_in_metadata}
+    final_metadata = {**extra, **built_in_metadata}
+
     return CVResult(
         fold_scores=fold_scores,
         mean=float(np.mean(fold_scores)),
         std=float(np.std(fold_scores)),
         oof=oof,
         duration_s=duration_s,
-        metadata={
-            "cv_strategy": cv.name,
-            "n_splits": cv.n_splits,
-            "metric": metric.name,
-            "problem_type": problem_type,
-        },
+        metadata=final_metadata,
     )
