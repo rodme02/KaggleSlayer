@@ -99,8 +99,15 @@ def _collect_import_aliases(tree: ast.AST) -> dict[str, tuple[str, ...]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for n in node.names:
-                local = n.asname or n.name.split(".")[0]
-                aliases[local] = tuple(n.name.split("."))
+                if n.asname:
+                    aliases[n.asname] = tuple(n.name.split("."))
+                else:
+                    # `import x.y.z` makes `x` available locally; the full module
+                    # is loaded but `x.y.z` is accessed as `x.y.z`. We register the
+                    # root so subsequent `x.foo(...)` resolves to ("x", "foo") not
+                    # ("x", "y", "z", "foo").
+                    root = n.name.split(".")[0]
+                    aliases[root] = (root,)
         elif isinstance(node, ast.ImportFrom) and node.module:
             base = tuple(node.module.split("."))
             for n in node.names:

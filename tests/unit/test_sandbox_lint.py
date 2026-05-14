@@ -167,3 +167,28 @@ def test_lint_aggregates_multiple_violations(tmp_path):
     result = sandbox.lint_module(p)
     assert not result.ok
     assert len(result.violations) >= 2
+
+
+def test_lint_catches_os_remove_even_when_os_path_was_imported(tmp_path):
+    """import os.path must not defeat the os.* denylist."""
+    p = _write(tmp_path, "bad.py", """
+        import os.path
+        def fit_feature_transformer(train_df, target_col):
+            os.remove("/tmp/x")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("os.remove" in v for v in result.violations)
+
+
+def test_lint_catches_os_system_even_when_os_path_was_imported(tmp_path):
+    p = _write(tmp_path, "bad.py", """
+        import os.path
+        def fit_feature_transformer(train_df, target_col):
+            os.system("echo bad")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("os.system" in v for v in result.violations)
