@@ -22,6 +22,8 @@ class _Ctx:
     metric_name: str = "accuracy"
     cv_kind: str | None = None
     cv_params: dict = field(default_factory=dict)
+    finished: bool = False
+    final_summary: str = ""
 
 
 def _write_stub_fe(workspace: Workspace) -> None:
@@ -170,3 +172,10 @@ def test_submit_local_requires_fe_and_model(comp_ctx):
     comp_ctx.workspace.fe_path.unlink()
     with pytest.raises(ToolError, match="fe.py"):
         ml_h.submit_local(comp_ctx, label="x")
+
+
+def test_done_sets_ctx_finished(comp_ctx):
+    msg = ml_h.done(comp_ctx, summary="best cv was 0.82 with lr baseline")
+    assert "0.82" in msg
+    assert comp_ctx.finished is True
+    assert comp_ctx.final_summary == "best cv was 0.82 with lr baseline"

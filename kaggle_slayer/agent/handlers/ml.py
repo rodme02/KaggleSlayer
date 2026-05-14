@@ -154,3 +154,10 @@ def _detect_id_column(df: pd.DataFrame) -> str | None:
     if first.lower().endswith("id"):
         return first
     return None
+
+
+def done(ctx: Any, *, summary: str) -> str:
+    """Signal that the agent is finished. The Solver loop exits after this returns."""
+    ctx.finished = True
+    ctx.final_summary = summary
+    return f"acknowledged: {summary}"
