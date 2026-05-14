@@ -289,6 +289,72 @@ def test_messages_to_contents_emits_function_call_part_for_model_with_tool_calls
     assert not txt, "first Part should not also carry text when carrying a function_call"
 
 
+def test_strip_removes_all_known_unsupported_keys():
+    """Beyond additionalProperties / $schema / $ref, several other JSON-schema
+    keys are rejected by Gemini's OpenAPI subset. Sprinkle them throughout a
+    nested schema and verify none survive the strip."""
+    from kaggle_slayer.agent.llm_client import _function_declarations_to_genai_tools
+
+    decls = [{
+        "name": "kitchen_sink",
+        "description": "schema covered with unsupported keys",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "n": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 1_000_000,
+                },
+                "mode": {"const": "fast"},
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "examples": ["a", "b"],
+                    },
+                },
+                "either": {
+                    "not": {"type": "null"},
+                },
+                "branching": {
+                    "type": "object",
+                    "if": {"properties": {"x": {"const": 1}}},
+                    "then": {"required": ["y"]},
+                    "else": {"required": ["z"]},
+                },
+            },
+            "dependentRequired": {"n": ["mode"]},
+            "dependentSchemas": {"mode": {"required": ["n"]}},
+            "additionalProperties": False,
+        },
+    }]
+    tools = _function_declarations_to_genai_tools(decls)
+    fd = tools[0].function_declarations[0]
+    params_dump = _params_wire_dump(fd.parameters)
+    import json as _json
+    serialized = _json.dumps(params_dump, default=str)
+    for forbidden in (
+        "examples",
+        "const",
+        "\"if\"",  # avoid false positive on Python keyword in unrelated tokens
+        "\"then\"",
+        "\"else\"",
+        "\"not\"",
+        "dependentRequired",
+        "dependent_required",
+        "dependentSchemas",
+        "dependent_schemas",
+        "exclusiveMinimum",
+        "exclusive_minimum",
+        "exclusiveMaximum",
+        "exclusive_maximum",
+        "additionalProperties",
+        "additional_properties",
+    ):
+        assert forbidden not in serialized, f"unexpected {forbidden!r} survived strip: {serialized}"
+
+
 def test_gemini_preserves_supported_keys(tmp_path):
     """The strip removes only the Gemini-unsupported keys — supported ones survive."""
     from kaggle_slayer.agent.llm_client import _function_declarations_to_genai_tools

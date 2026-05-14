@@ -132,12 +132,28 @@ def _messages_to_genai_contents(messages: list[Message]) -> list[Any]:
 # serializing to the Gemini wire format, but keep them in the local registry
 # so the in-process jsonschema validator can still enforce them.
 _GEMINI_UNSUPPORTED_SCHEMA_KEYS: frozenset[str] = frozenset({
+    # Identifiers / refs
     "additionalProperties",
     "$schema",
     "$id",
     "$ref",
     "definitions",
     "$defs",
+    # Pattern matching / examples
+    "examples",
+    "patternProperties",
+    # Constants and conditionals (JSON Schema draft-07+)
+    "const",
+    "if",
+    "then",
+    "else",
+    "not",
+    # Dependency keywords
+    "dependentRequired",
+    "dependentSchemas",
+    # Exclusive numeric bounds (Gemini accepts minimum/maximum only)
+    "exclusiveMinimum",
+    "exclusiveMaximum",
 })
 
 
