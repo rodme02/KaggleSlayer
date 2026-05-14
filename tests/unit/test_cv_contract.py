@@ -206,3 +206,63 @@ def test_train_cv_problem_type_inference_from_metric(
     # If problem_type was misinferred as regression, Ridge would not have
     # predict_proba and the call would have raised.
     assert result.mean > 0.5
+
+
+def test_train_cv_multi_class_proba(tmp_path):
+    """Multi-class classification with a needs_proba metric (logloss)
+    must work end-to-end."""
+    import textwrap
+    import pandas as pd
+    import numpy as np
+
+    fe = tmp_path / "fe.py"
+    fe.write_text(textwrap.dedent('''
+        import pandas as pd
+
+        class _PT:
+            def __init__(self, cols):
+                self.cols = cols
+            def transform(self, df):
+                return df[self.cols].copy()
+
+        def fit_feature_transformer(train_df, target_col):
+            cols = [c for c in train_df.columns
+                    if c != target_col and train_df[c].dtype.kind in "fiub"]
+            return _PT(cols)
+    '''))
+    model = tmp_path / "model.py"
+    model.write_text(textwrap.dedent('''
+        from sklearn.linear_model import LogisticRegression
+
+        def fit_model(X_train, y_train, problem_type, metric_name):
+            m = LogisticRegression(max_iter=500)
+            m.fit(X_train, y_train)
+            return m
+    '''))
+    rng = np.random.default_rng(0)
+    n = 300
+    df = pd.DataFrame({
+        "x1": rng.normal(size=n),
+        "x2": rng.normal(size=n),
+        "target": rng.integers(0, 3, size=n),  # 3-class
+    })
+
+    cv = cv_strategies.get("stratified_kfold", n_splits=3)
+    metric = metrics.get("logloss")
+
+    result = cv_mod.train_cv(
+        fe_path=fe,
+        model_path=model,
+        train_df=df,
+        target_col="target",
+        cv=cv,
+        metric=metric,
+    )
+    # Three classes → OOF should be (n, 3)
+    assert result.oof.shape == (n, 3)
+    # Probabilities should each be in [0, 1] and rows sum ~= 1
+    assert ((result.oof >= 0.0) & (result.oof <= 1.0)).all()
+    np.testing.assert_allclose(result.oof.sum(axis=1), 1.0, atol=1e-6)
+    # logloss is finite and non-negative
+    assert result.mean > 0.0
+    assert np.isfinite(result.mean)

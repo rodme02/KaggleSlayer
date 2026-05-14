@@ -156,25 +156,31 @@ def train_cv(
                     f"{model_path} has no .predict_proba"
                 )
             proba = model.predict_proba(X_val)
-            # Binary case: take positive-class probability. Multi-class
-            # probability outputs are deferred to a later week.
-            # Explicit ndim check is intentional — avoids a subtle ternary
-            # bug when proba is unexpectedly 1-D.
-            if proba.ndim == 2 and proba.shape[1] == 2:  # noqa: SIM108
-                preds = proba[:, 1]
+            if proba.ndim == 2 and proba.shape[1] == 2:
+                preds = proba[:, 1]  # binary: positive-class proba
             else:
-                preds = proba
+                preds = proba  # multi-class: keep matrix
         else:
             preds = model.predict(X_val)
 
         preds_arr = np.asarray(preds, dtype=float)
-        if preds_arr.ndim != 1:
+
+        # Lazily widen OOF on the first fold if predictions are 2-D.
+        if preds_arr.ndim == 2:
+            if oof.ndim == 1:
+                oof = np.full((n, preds_arr.shape[1]), np.nan, dtype=float)
+            elif oof.shape[1] != preds_arr.shape[1]:
+                raise CVError(
+                    f"fold {fold_i}: prediction width changed "
+                    f"({oof.shape[1]} -> {preds_arr.shape[1]})"
+                )
+            oof[val_idx] = preds_arr
+        elif preds_arr.ndim == 1:
+            oof[val_idx] = preds_arr
+        else:
             raise CVError(
-                f"multi-dimensional predictions not yet supported "
-                f"(got shape {preds_arr.shape}); only 1-D predictions "
-                f"(binary classification or regression) are valid in V1"
+                f"unsupported prediction shape {preds_arr.shape}"
             )
-        oof[val_idx] = preds_arr
         fold_scores.append(metric.score(y_val, preds))
 
     duration_s = time.perf_counter() - started
