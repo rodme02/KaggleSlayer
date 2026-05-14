@@ -111,6 +111,18 @@ def test_sample_rows_missing_table_raises(ctx):
         fh.sample_rows(ctx, table="train", n=3)
 
 
+def test_sample_rows_rejects_path_traversal(ctx):
+    """`table` must not be allowed to escape raw/ via '../'."""
+    with pytest.raises(ToolError, match=r"outside|traversal|invalid"):
+        fh.sample_rows(ctx, table="../../etc/passwd", n=5)
+
+
+def test_sample_rows_rejects_absolute_path(ctx):
+    """Absolute paths in `table` must be rejected the same way."""
+    with pytest.raises(ToolError, match=r"outside|traversal|invalid|absolute"):
+        fh.sample_rows(ctx, table="/etc/passwd", n=5)
+
+
 def test_sample_rows_caps_at_table_size(ctx):
     df = pd.DataFrame({"a": [1, 2, 3]})
     df.to_csv(ctx.workspace.raw_dir / "train.csv", index=False)

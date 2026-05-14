@@ -64,8 +64,19 @@ def write_file(ctx: Any, *, path: str, content: str) -> str:
 
 
 def sample_rows(ctx: Any, *, table: str, n: int = 10, random: bool = False) -> str:
-    """Return a sample of n rows from raw/<table>.csv as a string."""
-    target = ctx.workspace.raw_dir / f"{table}.csv"
+    """Return a sample of n rows from raw/<table>.csv as a string.
+
+    The `table` arg is treated as a basename — '..' segments or absolute
+    paths are rejected outright (F2: path traversal via the table arg).
+    """
+    if table.startswith("/") or table.startswith("\\") or ".." in Path(table).parts:
+        raise ToolError(
+            f"table {table!r} resolves outside raw/ (no path traversal allowed)"
+        )
+    target = _resolve_under(ctx.workspace.raw_dir, f"{table}.csv")
+    raw_resolved = ctx.workspace.raw_dir.resolve()
+    if not target.is_relative_to(raw_resolved):
+        raise ToolError(f"table {table!r} resolves outside raw/")
     if not target.exists():
         raise ToolError(f"{target.name} not found in raw/")
     df = pd.read_csv(target)
