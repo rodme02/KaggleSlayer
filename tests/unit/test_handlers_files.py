@@ -119,14 +119,17 @@ def test_sample_rows_returns_first_n_rows(ctx):
     assert "10" not in result or result.count("\n") <= 8  # tolerate header + 5 data lines
 
 
-def test_sample_rows_random_sampling(ctx):
+def test_sample_rows_random_sampling_is_deterministic_with_seed(ctx):
+    """sample_rows(random=True) uses a fixed random_state, so repeated calls
+    return identical samples — important for reproducible debugging."""
     df = pd.DataFrame({"a": range(100)})
     df.to_csv(ctx.workspace.raw_dir / "train.csv", index=False)
     r1 = fh.sample_rows(ctx, table="train", n=5, random=True)
     r2 = fh.sample_rows(ctx, table="train", n=5, random=True)
-    # Different random samples should be different (extremely high probability)
-    # but the function is deterministic for a given call — so we just verify it didn't crash
-    assert r1 and r2
+    assert r1 == r2, "expected deterministic sampling for reproducibility"
+    # And sanity-check that random sampling differs from head() for a large df.
+    r_head = fh.sample_rows(ctx, table="train", n=5, random=False)
+    assert r1 != r_head, "random sample should not match head() for 100 rows"
 
 
 def test_sample_rows_missing_table_raises(ctx):
