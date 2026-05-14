@@ -97,14 +97,22 @@ class Solver:
 
             response = self.llm.call(messages=messages, tools=tool_decls)
 
-            # If the LLM produced text alongside or instead of tool calls, append
-            # it as a model-role message so the next turn has continuity.
-            if response.text:
-                messages.append(Message(role="model", content=response.text))
-
             if not response.tool_calls:
-                # Pure-text response. Keep looping until the agent calls done or max iter.
+                # Pure-text response. Keep the model's words in history for
+                # continuity, then loop until the agent calls done or max iter.
+                if response.text:
+                    messages.append(Message(role="model", content=response.text))
                 continue
+
+            # Tool-call response. Gemini's multi-turn protocol requires the
+            # model(function_call) turn to precede the tool(function_response)
+            # turn in history — append it before dispatching so the next call's
+            # history is well-formed.
+            messages.append(Message(
+                role="model",
+                content=response.text or "",
+                tool_calls=response.tool_calls,
+            ))
 
             for tc in response.tool_calls:
                 tool_result_text = self._dispatch(tc.name, tc.args)

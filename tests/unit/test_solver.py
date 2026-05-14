@@ -142,3 +142,67 @@ def test_solver_context_carries_target_metric_problem_type(tmp_path):
     assert ctx.problem_type == "regression"
     assert ctx.metric_name == "rmse"
     assert ctx.finished is False
+
+
+def test_solver_appends_model_message_with_tool_calls(tmp_path):
+    """When the LLM returns a tool call, the Solver must append a
+    Message(role='model', tool_calls=[...]) before the tool-result message
+    so the next turn's history mirrors Gemini's call/response protocol."""
+    ws = _make_workspace_and_ctx(tmp_path)
+    client = _CannedClient(responses=[
+        Response(
+            text="",
+            tool_calls=[ToolCall(id="tc1", name="take_note",
+                                 args={"category": "observation", "content": "x"})],
+            usage=Usage(0, 0, 0),
+        ),
+        Response(
+            text="",
+            tool_calls=[ToolCall(id="tc2", name="done", args={"summary": "ok"})],
+            usage=Usage(0, 0, 0),
+        ),
+    ])
+    solver = Solver(workspace=ws, llm_client=client, max_iterations=5)
+    solver.solve()
+
+    # Second LLM call's history should contain a model-role Message whose
+    # tool_calls list reflects the take_note call.
+    second_msgs = client.captured[1]
+    model_msgs = [m for m in second_msgs if m.role == "model"]
+    assert any(getattr(m, "tool_calls", None) for m in model_msgs), \
+        "expected at least one model message carrying tool_calls"
+    matching = [
+        m for m in model_msgs
+        if getattr(m, "tool_calls", None) and m.tool_calls[0].name == "take_note"
+    ]
+    assert matching, "expected a model message whose first tool_call is take_note"
+
+
+def test_solver_model_message_precedes_tool_response(tmp_path):
+    """The model(tool_call) message must come BEFORE the tool(result) message
+    in the second call's history."""
+    ws = _make_workspace_and_ctx(tmp_path)
+    client = _CannedClient(responses=[
+        Response(
+            text="",
+            tool_calls=[ToolCall(id="tc1", name="take_note",
+                                 args={"category": "observation", "content": "x"})],
+            usage=Usage(0, 0, 0),
+        ),
+        Response(
+            text="",
+            tool_calls=[ToolCall(id="tc2", name="done", args={"summary": "ok"})],
+            usage=Usage(0, 0, 0),
+        ),
+    ])
+    solver = Solver(workspace=ws, llm_client=client, max_iterations=5)
+    solver.solve()
+
+    second_msgs = client.captured[1]
+    roles = [m.role for m in second_msgs]
+    # We expect: [system, user, model(tool_calls), tool(result)] as the prefix
+    assert roles[:4] == ["system", "user", "model", "tool"], (
+        f"expected [system, user, model, tool] prefix, got {roles[:4]}"
+    )
+    # The model message in slot 2 must be the one carrying tool_calls
+    assert second_msgs[2].tool_calls and second_msgs[2].tool_calls[0].name == "take_note"

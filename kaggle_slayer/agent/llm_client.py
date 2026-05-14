@@ -20,16 +20,21 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class Message:
-    role: str  # "user" | "model" | "system" | "tool"
-    content: str
-
-
-@dataclass(frozen=True)
 class ToolCall:
     id: str
     name: str
     args: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Message:
+    role: str  # "user" | "model" | "system" | "tool"
+    content: str
+    # Populated when the model returned function-call request parts. Empty for
+    # user/system/tool messages and for pure-text model replies. Keeping it on
+    # the message lets us reconstruct Gemini's required call/response pair in
+    # the conversation history (spec §multi-turn tool protocol).
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -106,7 +111,18 @@ def _messages_to_genai_contents(messages: list[Message]) -> list[Any]:
             ))
             contents.append(gt.Content(role="user", parts=[part]))
         elif m.role == "model":
-            contents.append(gt.Content(role="model", parts=[gt.Part(text=m.content)]))
+            if m.tool_calls:
+                # Model is requesting tool calls — emit one function_call Part
+                # per ToolCall so Gemini's multi-turn protocol stays well-formed
+                # (the corresponding function_response Parts come from later
+                # tool-role messages).
+                parts = [
+                    gt.Part(function_call=gt.FunctionCall(name=tc.name, args=tc.args))
+                    for tc in m.tool_calls
+                ]
+                contents.append(gt.Content(role="model", parts=parts))
+            else:
+                contents.append(gt.Content(role="model", parts=[gt.Part(text=m.content)]))
         else:  # user, system → user
             contents.append(gt.Content(role="user", parts=[gt.Part(text=m.content)]))
     return contents

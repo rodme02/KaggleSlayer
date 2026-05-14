@@ -200,6 +200,32 @@ def test_gemini_strips_unsupported_keys_recursively(tmp_path):
     assert "additional_properties" not in serialized
 
 
+def test_messages_to_contents_emits_function_call_part_for_model_with_tool_calls():
+    """A Message(role='model', tool_calls=[...]) must translate into a Gemini
+    Content with role='model' whose first Part exposes a function_call (not text)."""
+    from kaggle_slayer.agent.llm_client import _messages_to_genai_contents
+
+    msgs = [
+        llm.Message(role="user", content="hi"),
+        llm.Message(
+            role="model",
+            content="",
+            tool_calls=[llm.ToolCall(id="t1", name="train_cv", args={})],
+        ),
+    ]
+    contents = _messages_to_genai_contents(msgs)
+    assert len(contents) == 2
+    model_content = contents[1]
+    assert getattr(model_content, "role", None) == "model"
+    parts = list(getattr(model_content, "parts", []) or [])
+    assert parts, "model content with tool_calls must have at least one Part"
+    fc = getattr(parts[0], "function_call", None)
+    txt = getattr(parts[0], "text", None)
+    assert fc is not None, "first Part must expose a function_call"
+    assert getattr(fc, "name", None) == "train_cv"
+    assert not txt, "first Part should not also carry text when carrying a function_call"
+
+
 def test_gemini_preserves_supported_keys(tmp_path):
     """The strip removes only the Gemini-unsupported keys — supported ones survive."""
     from kaggle_slayer.agent.llm_client import _function_declarations_to_genai_tools
