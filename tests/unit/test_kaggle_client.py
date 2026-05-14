@@ -108,12 +108,12 @@ def test_client_get_leaderboard(mock_api):
     e2 = MagicMock()
     e2.team_name = "team_b"
     e2.score = "0.99999"
-    resp = MagicMock()
-    resp.submissions = [e1, e2]
-    mock_api.competition_view_leaderboard.return_value = resp
+    # Real API returns a list directly, NOT an object with .submissions
+    mock_api.competition_leaderboard_view.return_value = [e1, e2]
 
     client = kc_mod.KaggleClient()
     lb = client.get_leaderboard("titanic", top_n=2)
+    mock_api.competition_leaderboard_view.assert_called_once_with("titanic")
     assert len(lb) == 2
     assert lb[0].team_name == "team_a"
     assert lb[0].score == 1.0
@@ -126,9 +126,7 @@ def test_client_get_leaderboard_truncates_to_top_n(mock_api):
         e.team_name = f"team_{i}"
         e.score = f"{1.0 - i * 0.01:.5f}"
         entries.append(e)
-    resp = MagicMock()
-    resp.submissions = entries
-    mock_api.competition_view_leaderboard.return_value = resp
+    mock_api.competition_leaderboard_view.return_value = entries
 
     client = kc_mod.KaggleClient()
     lb = client.get_leaderboard("titanic", top_n=5)

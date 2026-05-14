@@ -104,8 +104,8 @@ class KaggleClient:
 
     def get_leaderboard(self, name: str, *, top_n: int = 50) -> list[LBEntry]:
         api = _get_api()
-        resp = api.competition_view_leaderboard(name)
-        entries = _safe_attr(resp, "submissions", []) or []
+        # v2.1 returns a list of ApiLeaderboardSubmission directly
+        entries = api.competition_leaderboard_view(name) or []
         result: list[LBEntry] = []
         for entry in entries[:top_n]:
             raw_score = _safe_attr(entry, "score", "0")
