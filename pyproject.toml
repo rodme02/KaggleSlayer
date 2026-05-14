@@ -80,7 +80,7 @@ ignore = ["E501", "B008"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["kaggle_slayer/harness"]
+files = ["kaggle_slayer/harness", "kaggle_slayer/agent"]
 strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
