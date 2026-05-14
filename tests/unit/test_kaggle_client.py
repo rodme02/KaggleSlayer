@@ -87,10 +87,10 @@ def test_client_view_competition_empty_results_raises(mock_api):
 def test_client_list_files(mock_api):
     file_a = MagicMock()
     file_a.name = "train.csv"
-    file_a.size = 60302
+    file_a.total_bytes = 60302  # v2.1 field name (NOT 'size')
     file_b = MagicMock()
     file_b.name = "test.csv"
-    file_b.size = 28629
+    file_b.total_bytes = 28629
     resp = MagicMock()
     resp.files = [file_a, file_b]
     mock_api.competition_list_files.return_value = resp
@@ -98,7 +98,8 @@ def test_client_list_files(mock_api):
     client = kc_mod.KaggleClient()
     files = client.list_files("titanic")
     assert [f.name for f in files] == ["train.csv", "test.csv"]
-    assert files[0].size == 60302
+    assert files[0].size == 60302  # CompetitionFile.size populated from total_bytes
+    assert files[1].size == 28629
 
 
 def test_client_get_leaderboard(mock_api):

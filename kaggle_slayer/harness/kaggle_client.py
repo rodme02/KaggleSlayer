@@ -89,7 +89,8 @@ class KaggleClient:
         return [
             CompetitionFile(
                 name=_safe_attr(f, "name", ""),
-                size=int(_safe_attr(f, "size", 0) or 0),
+                # The kaggle library v2.1 field is `total_bytes`, not `size`.
+                size=int(_safe_attr(f, "total_bytes", 0) or 0),
             )
             for f in files
         ]
