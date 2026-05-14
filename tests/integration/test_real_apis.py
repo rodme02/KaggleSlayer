@@ -74,9 +74,31 @@ def test_real_kaggle_competitions_list(kaggle_creds_present):
     assert len(comps) > 0
 
 
-def test_real_kaggle_view_competition(kaggle_creds_present):
-    """List files in a well-known evergreen competition that should always exist."""
+def test_real_kaggle_list_files(kaggle_creds_present):
+    """KaggleClient.list_files('titanic') returns the data files with non-zero sizes."""
     client = KaggleClient()
     files = client.list_files("titanic")
     assert len(files) > 0
     assert any("train" in f.name.lower() for f in files)
+    # total_bytes must be propagated to CompetitionFile.size
+    assert all(f.size > 0 for f in files)
+
+
+def test_real_kaggle_view_competition(kaggle_creds_present):
+    """KaggleClient.view_competition('titanic') returns a populated CompetitionInfo."""
+    client = KaggleClient()
+    info = client.view_competition("titanic")
+    assert "titanic" in (info.title or "").lower()
+    # Description and metric should be non-empty for an evergreen comp
+    assert info.description
+    assert info.metric  # Titanic's metric is 'Categorization Accuracy'
+
+
+def test_real_kaggle_get_leaderboard(kaggle_creds_present):
+    """KaggleClient.get_leaderboard('titanic', top_n=3) returns 3 entries with scores."""
+    client = KaggleClient()
+    lb = client.get_leaderboard("titanic", top_n=3)
+    assert len(lb) == 3
+    # All scores should parse to floats in [0, 1] for an accuracy competition
+    for e in lb:
+        assert 0.0 <= e.score <= 1.0
