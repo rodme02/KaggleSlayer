@@ -322,6 +322,37 @@ def test_train_cv_metadata_extra_merged_into_result(
     assert result.metadata["metric"] == "accuracy"
 
 
+def test_train_cv_lints_fe_and_model_first(tmp_path, model_logreg, synthetic_binary):
+    """fe.py with a forbidden call (subprocess) must be rejected by the
+    sandbox lint before the harness loads it. The error must mention
+    'lint' or the forbidden token so the agent can correct on the next turn."""
+    fe = tmp_path / "fe.py"
+    fe.write_text(textwrap.dedent("""
+        import subprocess
+
+        class T:
+            def transform(self, df):
+                return df
+
+        def fit_feature_transformer(train_df, target_col):
+            subprocess.run(["echo", "bad"])
+            return T()
+    """))
+    train, target_col = synthetic_binary
+    cv = cv_strategies.get("stratified_kfold", n_splits=3)
+    metric = metrics.get("accuracy")
+
+    with pytest.raises(cv_mod.CVError, match=r"lint|subprocess"):
+        cv_mod.train_cv(
+            fe_path=fe,
+            model_path=model_logreg,
+            train_df=train,
+            target_col=target_col,
+            cv=cv,
+            metric=metric,
+        )
+
+
 def test_train_cv_metadata_extra_does_not_overwrite_builtin(
     fe_pass_through, model_logreg, synthetic_binary
 ):

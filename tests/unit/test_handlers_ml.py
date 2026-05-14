@@ -137,6 +137,67 @@ def test_train_cv_uses_cv_override_when_set(comp_ctx):
     assert "stratified" not in result
 
 
+def test_train_cv_lints_fe_and_model_first(comp_ctx):
+    """A fe.py calling subprocess must be rejected before load.
+    No version archive should be written for a lint-failed module."""
+    comp_ctx.workspace.fe_path.write_text(
+        "import subprocess\n"
+        "\n"
+        "class _T:\n"
+        "    def transform(self, df):\n"
+        "        return df\n"
+        "\n"
+        "def fit_feature_transformer(train_df, target_col):\n"
+        "    subprocess.run(['echo', 'bad'])\n"
+        "    return _T()\n"
+    )
+    with pytest.raises(ToolError, match=r"lint|subprocess"):
+        ml_h.train_cv(comp_ctx)
+    # Lint failure must not bump the version counter (F7)
+    assert not (comp_ctx.workspace.versions_dir / "fe_v01.py").exists()
+    assert not (comp_ctx.workspace.versions_dir / "model_v01.py").exists()
+
+
+def test_submit_local_lints_fe_and_model_first(comp_ctx):
+    """A model.py with a disallowed call must be rejected before submit_local
+    tries to load it."""
+    comp_ctx.workspace.model_path.write_text(
+        "import os\n"
+        "from sklearn.linear_model import LogisticRegression\n"
+        "\n"
+        "def fit_model(X_train, y_train, problem_type, metric_name):\n"
+        "    os.system('echo bad')\n"
+        "    m = LogisticRegression(max_iter=500, random_state=42)\n"
+        "    m.fit(X_train, y_train)\n"
+        "    return m\n"
+    )
+    with pytest.raises(ToolError, match=r"lint|os\.system"):
+        ml_h.submit_local(comp_ctx, label="x")
+
+
+def test_train_cv_does_not_archive_when_cv_fails(comp_ctx):
+    """If cv_mod.train_cv raises (e.g. fe.transform mutates row count),
+    the version archive must not be written. The next attempt should
+    still get fe_v01.py."""
+    comp_ctx.workspace.fe_path.write_text(
+        "import pandas as pd\n"
+        "\n"
+        "class _Dropper:\n"
+        "    def __init__(self, cols):\n"
+        "        self.cols = cols\n"
+        "    def transform(self, df):\n"
+        "        return df[self.cols].iloc[::2].copy()\n"
+        "\n"
+        "def fit_feature_transformer(train_df, target_col):\n"
+        "    cols = [c for c in train_df.columns if c != target_col and train_df[c].dtype.kind in 'fiub']\n"
+        "    return _Dropper(cols)\n"
+    )
+    with pytest.raises(Exception):  # noqa: B017 — CVError or similar
+        ml_h.train_cv(comp_ctx)
+    assert not (comp_ctx.workspace.versions_dir / "fe_v01.py").exists()
+    assert not (comp_ctx.workspace.versions_dir / "model_v01.py").exists()
+
+
 def test_train_cv_missing_fe_raises(comp_ctx):
     comp_ctx.workspace.fe_path.unlink()
     with pytest.raises(ToolError, match="fe.py"):

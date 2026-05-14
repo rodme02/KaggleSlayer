@@ -21,6 +21,7 @@ import pandas as pd  # type: ignore[import-untyped]
 from kaggle_slayer.agent.tools import ToolError
 from kaggle_slayer.harness import cv as cv_mod
 from kaggle_slayer.harness.registry import cv_strategies, metrics
+from kaggle_slayer.harness.sandbox import lint_module
 
 _ALLOWED_CV_KINDS: frozenset[str] = frozenset({"kfold", "stratified_kfold", "time_series", "group_kfold"})
 
@@ -33,6 +34,18 @@ def _require_files(ctx: Any) -> tuple[Path, Path]:
     if not model.exists():
         raise ToolError("agent/model.py not found — write it first with write_file")
     return fe, model
+
+
+def _lint_or_raise(path: Path) -> None:
+    """Run the sandbox AST lint on `path` and raise ToolError on violations.
+
+    Centralised so train_cv and submit_local share the exact same gate.
+    """
+    result = lint_module(path)
+    if not result.ok:
+        raise ToolError(
+            f"sandbox lint rejected {path.name}: {'; '.join(result.violations)}"
+        )
 
 
 def set_cv(ctx: Any, *, kind: str, n_splits: int = 5, group_col: str | None = None) -> str:
@@ -59,18 +72,31 @@ def _build_cv_strategy(ctx: Any) -> Any:
 
 
 def train_cv(ctx: Any) -> str:
-    """Archive fe.py + model.py into versions/, then run leak-free CV."""
+    """Run leak-free CV. Archive fe.py + model.py to versions/ ONLY on success.
+
+    Order (F1/F7):
+      1. Sandbox-lint fe.py + model.py — failure raises before any archive.
+      2. Peek the would-be archive paths (next_version_path is pure).
+      3. Run cv_mod.train_cv with those peeked names in metadata_extra.
+      4. On success, copy fe.py and model.py to the peeked paths.
+
+    Failure at any step leaves the version counter intact so the next call
+    re-uses the same slot.
+    """
     fe_path, model_path = _require_files(ctx)
-    # Archive
+    # 1. Lint first — never load agent code that fails the sandbox.
+    _lint_or_raise(fe_path)
+    _lint_or_raise(model_path)
+
+    # 2. Peek the post-success archive paths (does not create files).
     fe_archive = ctx.workspace.next_version_path("fe")
     model_archive = ctx.workspace.next_version_path("model")
-    shutil.copyfile(fe_path, fe_archive)
-    shutil.copyfile(model_path, model_archive)
 
     train_df = pd.read_csv(ctx.workspace.raw_dir / "train.csv")
     cv = _build_cv_strategy(ctx)
     metric = metrics.get(ctx.metric_name)
 
+    # 3. Run CV with the peeked names so metadata stays accurate.
     result = cv_mod.train_cv(
         fe_path=fe_path,
         model_path=model_path,
@@ -80,6 +106,10 @@ def train_cv(ctx: Any) -> str:
         metric=metric,
         metadata_extra={"fe_version": fe_archive.stem, "model_version": model_archive.stem},
     )
+
+    # 4. Only on success: archive. Any exception above skips this.
+    shutil.copyfile(fe_path, fe_archive)
+    shutil.copyfile(model_path, model_archive)
 
     summary = (
         f"train_cv complete: {cv.name} ({cv.n_splits} folds), metric={metric.name}, "
@@ -92,6 +122,9 @@ def train_cv(ctx: Any) -> str:
 def submit_local(ctx: Any, *, label: str) -> str:
     """Fit fe.py + model.py on the full train set; predict test; write submission CSV."""
     fe_path, model_path = _require_files(ctx)
+    # F1: lint before loading agent code, same as train_cv.
+    _lint_or_raise(fe_path)
+    _lint_or_raise(model_path)
 
     train_df = pd.read_csv(ctx.workspace.raw_dir / "train.csv")
     test_path = ctx.workspace.raw_dir / "test.csv"

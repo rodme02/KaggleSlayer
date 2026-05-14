@@ -24,6 +24,7 @@ import pandas as pd  # type: ignore[import-untyped]
 
 from kaggle_slayer.harness.registry.cv_strategies import CVStrategy
 from kaggle_slayer.harness.registry.metrics import Metric
+from kaggle_slayer.harness.sandbox import lint_module
 
 
 class CVError(Exception):
@@ -43,7 +44,17 @@ class CVResult:
 
 
 def _load_module(path: Path, name: str) -> ModuleType:
-    """Dynamically import the agent's module from disk."""
+    """Dynamically import the agent's module from disk.
+
+    Runs the sandbox AST lint FIRST and refuses to load the module if it
+    contains forbidden patterns. The lint must run before any version
+    archive copy so that a failed lint doesn't bump the version counter.
+    """
+    result = lint_module(path)
+    if not result.ok:
+        raise CVError(
+            f"sandbox lint rejected {path.name}: {'; '.join(result.violations)}"
+        )
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise CVError(f"cannot load module from {path}")
