@@ -3,8 +3,12 @@
 Usage:
     python scripts/preflight.py
 
-Exits 0 if all checks pass, 1 otherwise. Re-run after fixing any issues.
+Loads .env automatically (if present). Exits 0 if all checks pass, 1 otherwise.
 This script is the seed of the future health-check telemetry (spec §11.2).
+
+Credential sources accepted:
+  - Gemini: GEMINI_API_KEY or GOOGLE_API_KEY (env or .env)
+  - Kaggle: ~/.kaggle/kaggle.json  OR  KAGGLE_USERNAME + KAGGLE_KEY (env or .env)
 """
 
 from __future__ import annotations
@@ -14,35 +18,51 @@ import stat
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+# Load .env from the repo root (one level up from this script).
+ROOT = Path(__file__).resolve().parents[1]
+DOTENV_PATH = ROOT / ".env"
+DOTENV_LOADED = load_dotenv(DOTENV_PATH)
 
 console = Console()
 
 KAGGLE_JSON = Path.home() / ".kaggle" / "kaggle.json"
 
 
-def check_kaggle_credentials_file() -> tuple[bool, str]:
-    if not KAGGLE_JSON.exists():
-        return False, (
-            f"missing {KAGGLE_JSON}\n"
-            "  → Create one at https://www.kaggle.com/settings (API section, "
-            "'Create New API Token'), then:\n"
-            "      mkdir -p ~/.kaggle && mv ~/Downloads/kaggle.json ~/.kaggle/\n"
-            "      chmod 600 ~/.kaggle/kaggle.json"
-        )
-    mode = stat.S_IMODE(KAGGLE_JSON.stat().st_mode)
-    if mode & 0o077:
-        return False, (
-            f"{KAGGLE_JSON} is world/group readable (mode {oct(mode)})\n"
-            "  → Fix: chmod 600 ~/.kaggle/kaggle.json"
-        )
-    return True, f"{KAGGLE_JSON} present, mode {oct(mode)}"
+def check_kaggle_credentials() -> tuple[bool, str]:
+    """Either ~/.kaggle/kaggle.json (file) or KAGGLE_USERNAME+KAGGLE_KEY (env)."""
+    env_user = os.environ.get("KAGGLE_USERNAME")
+    env_key = os.environ.get("KAGGLE_KEY")
+    if env_user and env_key:
+        return True, f"using env vars KAGGLE_USERNAME='{env_user}', KAGGLE_KEY (len {len(env_key)})"
+
+    if KAGGLE_JSON.exists():
+        mode = stat.S_IMODE(KAGGLE_JSON.stat().st_mode)
+        if mode & 0o077:
+            return False, (
+                f"{KAGGLE_JSON} is world/group readable (mode {oct(mode)})\n"
+                "  → Fix: chmod 600 ~/.kaggle/kaggle.json"
+            )
+        return True, f"using {KAGGLE_JSON} (mode {oct(mode)})"
+
+    return False, (
+        "no Kaggle credentials found.\n"
+        "  → Option A — env vars in .env:\n"
+        "      KAGGLE_USERNAME=your_username\n"
+        "      KAGGLE_KEY=the_long_alphanumeric_key_from_kaggle.json\n"
+        "  → Option B — credential file:\n"
+        "      mkdir -p ~/.kaggle && mv ~/Downloads/kaggle.json ~/.kaggle/\n"
+        "      chmod 600 ~/.kaggle/kaggle.json\n"
+        "  (Get the token from https://www.kaggle.com/settings → API → 'Create New API Token')"
+    )
 
 
 def check_kaggle_api_call() -> tuple[bool, str]:
-    """Try a read-only Kaggle API call. Authenticates implicitly on import."""
+    """Try a read-only Kaggle API call. Library auto-detects creds at import time."""
     try:
         from kaggle import api  # type: ignore[import-untyped]
 
@@ -61,9 +81,9 @@ def check_gemini_env_var() -> tuple[bool, str]:
             return True, f"{var} is set (length {len(os.environ[var])})"
     return False, (
         "neither GEMINI_API_KEY nor GOOGLE_API_KEY is set\n"
-        "  → Get a key at https://aistudio.google.com/app/apikey, then add to ~/.zshrc:\n"
-        "      export GEMINI_API_KEY=\"...\"\n"
-        "      source ~/.zshrc"
+        "  → Add to .env (or ~/.zshrc):\n"
+        "      GEMINI_API_KEY=your-key-here\n"
+        "  (Get a key at https://aistudio.google.com/app/apikey)"
     )
 
 
@@ -96,12 +116,18 @@ def check_gemini_api_call() -> tuple[bool, str]:
 
 def main() -> int:
     console.rule("[bold cyan]KaggleSlayer preflight")
+    if DOTENV_LOADED:
+        console.print(f"[dim]loaded {DOTENV_PATH.relative_to(ROOT)}[/dim]")
+    elif DOTENV_PATH.exists():
+        console.print(f"[yellow]warning:[/] {DOTENV_PATH} exists but failed to load")
+    else:
+        console.print(f"[dim]no {DOTENV_PATH.relative_to(ROOT)} found (using only shell env)[/dim]")
 
     checks = [
-        ("Kaggle credentials file", check_kaggle_credentials_file),
-        ("Kaggle API call",         check_kaggle_api_call),
-        ("Gemini env var",          check_gemini_env_var),
-        ("Gemini API call",         check_gemini_api_call),
+        ("Kaggle credentials", check_kaggle_credentials),
+        ("Kaggle API call",    check_kaggle_api_call),
+        ("Gemini env var",     check_gemini_env_var),
+        ("Gemini API call",    check_gemini_api_call),
     ]
 
     table = Table(show_header=True, header_style="bold")
@@ -112,9 +138,8 @@ def main() -> int:
     all_ok = True
     blocked_by_prereq = False
     for label, fn in checks:
-        # Skip the API call if its prereq failed
         if label == "Kaggle API call" and blocked_by_prereq:
-            table.add_row(label, "[yellow]skip", "(credentials file missing)")
+            table.add_row(label, "[yellow]skip", "(credentials missing)")
             continue
         if label == "Gemini API call" and blocked_by_prereq:
             table.add_row(label, "[yellow]skip", "(env var missing)")
@@ -123,7 +148,7 @@ def main() -> int:
         ok, detail = fn()
         if not ok:
             all_ok = False
-            if label in ("Kaggle credentials file", "Gemini env var"):
+            if label in ("Kaggle credentials", "Gemini env var"):
                 blocked_by_prereq = True
             else:
                 blocked_by_prereq = False
