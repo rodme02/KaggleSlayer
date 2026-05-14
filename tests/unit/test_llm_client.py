@@ -55,8 +55,13 @@ def test_llm_client_protocol_exposes_call():
 def _fake_genai_response(text: str, in_tok: int = 10, out_tok: int = 5, cached_tok: int = 0):
     resp = MagicMock()
     resp.text = text
+    # Single text part, no function_call — mirrors what the real Gemini SDK
+    # returns for plain text responses.
+    part = MagicMock()
+    part.function_call = None
+    part.text = text
     candidate = MagicMock()
-    candidate.content.parts = []  # no tool calls
+    candidate.content.parts = [part]
     resp.candidates = [candidate]
     usage = MagicMock()
     usage.prompt_token_count = in_tok

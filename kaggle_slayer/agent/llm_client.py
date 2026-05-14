@@ -10,6 +10,7 @@ token counts so the harness can compute cost via the CostLedger.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -75,19 +76,55 @@ def _make_genai_client(api_key: str) -> Any:  # noqa: ANN401 — google-genai is
     return genai.Client(api_key=api_key)
 
 
-def _messages_to_genai_contents(messages: list[Message]) -> str:
-    """Flatten messages to the simple string form Gemini accepts for now.
+def _messages_to_genai_contents(messages: list[Message]) -> list[Any]:
+    """Translate the harness's Message list to Gemini's Content list.
 
-    Week 3 will replace this with the structured contents-array form once we
-    have multi-turn conversations and tool messages to encode.
+    user / system messages → user-role Content with a text Part.
+    model messages → model-role Content with a text Part.
+    tool messages → user-role Content with a function_response Part (Gemini's
+        convention is that tool results come back from the "user" role).
+
+    For tool messages, `content` must be a JSON object string with shape
+    {"tool": "<name>", "result": <any json-able>}.
     """
-    parts = []
+    from google.genai import types as gt
+
+    contents: list[Any] = []
     for m in messages:
-        prefix = {"user": "USER", "model": "MODEL", "system": "SYSTEM", "tool": "TOOL"}.get(
-            m.role, m.role.upper()
+        if m.role == "tool":
+            try:
+                payload = json.loads(m.content)
+            except json.JSONDecodeError:
+                payload = {"tool": "unknown", "result": m.content}
+            name = payload.get("tool", "unknown")
+            result = payload.get("result", "")
+            # FunctionResponse.response must be a dict — wrap scalars/strings.
+            response_payload = result if isinstance(result, dict) else {"result": result}
+            part = gt.Part(function_response=gt.FunctionResponse(
+                name=name,
+                response=response_payload,
+            ))
+            contents.append(gt.Content(role="user", parts=[part]))
+        elif m.role == "model":
+            contents.append(gt.Content(role="model", parts=[gt.Part(text=m.content)]))
+        else:  # user, system → user
+            contents.append(gt.Content(role="user", parts=[gt.Part(text=m.content)]))
+    return contents
+
+
+def _function_declarations_to_genai_tools(declarations: list[dict[str, Any]]) -> list[Any]:
+    """Translate our generic function-declaration list to Gemini's Tool list."""
+    from google.genai import types as gt
+
+    decls = [
+        gt.FunctionDeclaration(
+            name=d["name"],
+            description=d.get("description", ""),
+            parameters=d.get("parameters"),
         )
-        parts.append(f"{prefix}: {m.content}")
-    return "\n\n".join(parts)
+        for d in declarations
+    ]
+    return [gt.Tool(function_declarations=decls)]
 
 
 _TRANSIENT_STATUS_CODES: frozenset[int] = frozenset({408, 429, 500, 502, 503, 504})
@@ -141,25 +178,30 @@ class GeminiClient:
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
     ) -> Response:
-        _ = tools  # Tool-use schema translation lands in Week 3
+        from google.genai import types as gt
+
         chosen_model = model or self._default_model
         contents = _messages_to_genai_contents(messages)
+
+        config = None
+        if tools:
+            gemini_tools = _function_declarations_to_genai_tools(tools)
+            config = gt.GenerateContentConfig(tools=gemini_tools)
 
         last_err: Exception | None = None
         raw = None
         for attempt in range(self._retry_max + 1):
             try:
-                raw = self._client.models.generate_content(
-                    model=chosen_model,
-                    contents=contents,
-                )
+                kwargs: dict[str, Any] = {"model": chosen_model, "contents": contents}
+                if config is not None:
+                    kwargs["config"] = config
+                raw = self._client.models.generate_content(**kwargs)
                 break
             except Exception as e:  # noqa: BLE001
                 last_err = e
                 if not _is_transient(e) or attempt == self._retry_max:
                     raise
-                delay = self._retry_base_delay_s * (2 ** attempt)
-                time.sleep(delay)
+                time.sleep(self._retry_base_delay_s * (2 ** attempt))
         if raw is None:
             raise last_err or RuntimeError("unreachable")
 
@@ -176,9 +218,25 @@ class GeminiClient:
             cached_tokens=u.cached_tokens,
             competition=self._competition,
         )
+
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for cand in (raw.candidates or []):
+            for part in (getattr(cand.content, "parts", None) or []):
+                fc = getattr(part, "function_call", None)
+                if fc is not None:
+                    args = dict(getattr(fc, "args", {}) or {})
+                    tool_calls.append(ToolCall(
+                        id=getattr(fc, "id", "") or f"tc_{len(tool_calls)}",
+                        name=fc.name,
+                        args=args,
+                    ))
+                elif getattr(part, "text", None):
+                    text_parts.append(part.text)
+
         return Response(
-            text=(raw.text or "").strip(),
-            tool_calls=[],  # parsing tool-call parts lands in Week 3
+            text="\n".join(text_parts).strip(),
+            tool_calls=tool_calls,
             usage=u,
             raw=raw,
         )
