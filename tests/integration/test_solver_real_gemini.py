@@ -46,7 +46,11 @@ def test_real_gemini_solves_synthetic_microcomp(tmp_path, gemini_key):
         ledger=ledger,
         competition="synthetic-e2e",
         default_model="gemini-2.5-flash",
-        retry_max=2,
+        # Free-tier Flash is capped at 5 RPM, so retries must be patient enough
+        # to span a minute. With base=20s and 4 retries: 20s, 40s, 80s, 160s
+        # = ~5 minutes of backoff per call, well inside time_budget_s.
+        retry_max=4,
+        retry_base_delay_s=20.0,
     )
     solver = Solver(
         workspace=workspace,
@@ -54,8 +58,12 @@ def test_real_gemini_solves_synthetic_microcomp(tmp_path, gemini_key):
         target_col="Survived",
         problem_type="classification",
         metric_name="accuracy",
-        max_iterations=20,
-        time_budget_s=600.0,
+        # A scripted-but-tight solve is ~7 turns (read_context, sample_rows,
+        # write fe.py, write model.py, train_cv, submit_local, done). 10 gives
+        # the agent slack to iterate. time_budget_s=900 (15 min) handles 429
+        # backoff against the 5 RPM cap.
+        max_iterations=10,
+        time_budget_s=900.0,
     )
     result = solver.solve()
 
