@@ -1,8 +1,10 @@
 """Real-Gemini E2E acceptance — slow tier, opt-in.
 
 Runs the full Solver loop against a synthetic comp with real Gemini.
-Costs ~$0.01-0.05 per run depending on iteration count. Skipped when
-GEMINI_API_KEY is missing.
+Uses gemini-2.5-flash by default — it has real free-tier quota and is
+~10x cheaper than Pro, which is plenty for a 500-row binary-classification
+micro-comp. Costs ~$0.005-0.02 per run. Skipped when GEMINI_API_KEY is
+missing.
 
 Run with: pytest -m slow tests/integration/test_solver_real_gemini.py -v
 """
@@ -43,7 +45,7 @@ def test_real_gemini_solves_synthetic_microcomp(tmp_path, gemini_key):
         api_key=gemini_key,
         ledger=ledger,
         competition="synthetic-e2e",
-        default_model="gemini-2.5-pro",
+        default_model="gemini-2.5-flash",
         retry_max=2,
     )
     solver = Solver(
