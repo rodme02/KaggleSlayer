@@ -3,7 +3,7 @@
 *.env.local
 .kaggle/
 
-# Python cache
+# Python cache + build artifacts
 __pycache__/
 *.pyc
 *.pyo
@@ -11,34 +11,43 @@ __pycache__/
 .Python
 *.py[cod]
 *$py.class
+build/
+dist/
+*.egg-info/
 
-# Virtual environment
+# Virtual environments
 venv/
 env/
 ENV/
 .venv/
 
-# IDE
+# IDE / editor
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
-.claude/
 
-# Feature cache
-.cache/
+# Testing + lint caches
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
 
-# Temporary download directory
+# Per-competition workspaces (V2 spec §10) + V1 leftovers + raw downloads
+competitions/
+competition_data/
 .temp_download/
 
-# Data files
-competition_data/
+# Bulk data — explicitly add small samples with `git add -f`
 *.csv
 *.tsv
 *.parquet
 
-# Logs and results
+# Logs, results, outputs
 *.log
 results/
 outputs/
@@ -55,36 +64,16 @@ catboost_info/
 mlruns/
 wandb/
 tensorboard_logs/
+.streamlit/
 
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
-notebook.ipynb
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Ruff
-.ruff_cache/
-
-# Claude Code session artifacts
-.claude-init.log
-
-# MLflow local store
-mlruns/
-
-# Streamlit cache
-.streamlit/
+# Feature cache
+.cache/
 
 # System files
 .DS_Store
 Thumbs.db
 *.tmp
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
