@@ -208,6 +208,36 @@ def test_train_cv_problem_type_inference_from_metric(
     assert result.mean > 0.5
 
 
+def test_infer_problem_type_forces_regression_for_regression_metrics(
+    fe_pass_through, model_logreg, tmp_path,
+):
+    """RMSE/MAE/R2 must force regression even if target has few unique values."""
+    import pandas as pd
+    import numpy as np
+    rng = np.random.default_rng(0)
+    n = 200
+    # Rating-style target: 5 unique values, dtype float
+    df = pd.DataFrame({
+        "x1": rng.normal(size=n),
+        "x2": rng.normal(size=n),
+        "target": rng.choice([1.0, 2.0, 3.0, 4.0, 5.0], size=n),
+    })
+    cv = cv_strategies.get("kfold", n_splits=3)
+    metric = metrics.get("rmse")
+    result = cv_mod.train_cv(
+        fe_path=fe_pass_through,
+        model_path=model_logreg,
+        train_df=df,
+        target_col="target",
+        cv=cv,
+        metric=metric,
+    )
+    assert result.metadata["problem_type"] == "regression"
+    # Ridge predictions are continuous floats, not 1..5
+    # RMSE should be well below the per-class std baseline (sd ~ 1.4)
+    assert result.mean < 1.5
+
+
 def test_train_cv_multi_class_proba(tmp_path):
     """Multi-class classification with a needs_proba metric (logloss)
     must work end-to-end."""

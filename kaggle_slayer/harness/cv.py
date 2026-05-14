@@ -59,22 +59,15 @@ def _require_callable(mod: ModuleType, name: str, where: Path) -> Any:
     return fn
 
 
-def _infer_problem_type(metric: Metric, target: pd.Series) -> str:
-    """Infer problem type from metric metadata and target dtype.
+def _infer_problem_type(metric: Metric, target: pd.Series) -> str:  # noqa: ARG001
+    """Use the metric's declared kind as the primary (and for Week-1, sole) signal.
 
-    Primary signal: if the metric needs probabilities, it is always classification.
-    Secondary signal: if the target is integer-typed or has few unique values
-    (≤ 20), treat as classification. This handles non-proba classification
-    metrics like accuracy. Agent-level overrides are added in a later week.
+    The `target` parameter is retained for forward compatibility — Week 2 may
+    introduce ambiguous metrics where the target dtype or cardinality is needed
+    as a tiebreaker. For all Week-1 metrics every Metric has an explicit kind
+    field, so the target is unused here.
     """
-    if metric.needs_proba:
-        return "classification"
-    if target.dtype.kind in "iub":  # integer, unsigned int, bool
-        return "classification"
-    n_unique = target.nunique()
-    if n_unique <= 20:  # noqa: PLR2004  — heuristic threshold
-        return "classification"
-    return "regression"
+    return metric.kind
 
 
 def train_cv(
