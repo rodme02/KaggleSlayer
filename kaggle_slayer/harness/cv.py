@@ -149,10 +149,7 @@ def train_cv(
                     f"{model_path} has no .predict_proba"
                 )
             proba = model.predict_proba(X_val)
-            if proba.ndim == 2 and proba.shape[1] == 2:
-                preds = proba[:, 1]  # binary: positive-class proba
-            else:
-                preds = proba  # multi-class: keep matrix
+            preds = proba[:, 1] if proba.ndim == 2 and proba.shape[1] == 2 else proba  # noqa: SIM108
         else:
             preds = model.predict(X_val)
 
@@ -162,10 +159,10 @@ def train_cv(
         if preds_arr.ndim == 2:
             if oof.ndim == 1:
                 oof = np.full((n, preds_arr.shape[1]), np.nan, dtype=float)
-            elif oof.shape[1] != preds_arr.shape[1]:
+            elif oof.shape[1] != preds_arr.shape[1]:  # type: ignore[misc]
                 raise CVError(
                     f"fold {fold_i}: prediction width changed "
-                    f"({oof.shape[1]} -> {preds_arr.shape[1]})"
+                    f"({oof.shape[1]} -> {preds_arr.shape[1]})"  # type: ignore[misc]
                 )
             oof[val_idx] = preds_arr
         elif preds_arr.ndim == 1:

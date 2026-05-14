@@ -212,8 +212,8 @@ def test_infer_problem_type_forces_regression_for_regression_metrics(
     fe_pass_through, model_logreg, tmp_path,
 ):
     """RMSE/MAE/R2 must force regression even if target has few unique values."""
-    import pandas as pd
     import numpy as np
+    import pandas as pd
     rng = np.random.default_rng(0)
     n = 200
     # Rating-style target: 5 unique values, dtype float
@@ -242,8 +242,9 @@ def test_train_cv_multi_class_proba(tmp_path):
     """Multi-class classification with a needs_proba metric (logloss)
     must work end-to-end."""
     import textwrap
-    import pandas as pd
+
     import numpy as np
+    import pandas as pd
 
     fe = tmp_path / "fe.py"
     fe.write_text(textwrap.dedent('''

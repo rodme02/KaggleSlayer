@@ -79,11 +79,17 @@ _FACTORIES = {
 }
 
 
-def get(name: str, *, n_splits: int = 5, random_state: int | None = 42, **kwargs: object) -> CVStrategy:
+def get(
+    name: str,
+    *,
+    n_splits: int = 5,
+    random_state: int | None = 42,
+    shuffle: bool = True,
+) -> CVStrategy:
     """Construct a CVStrategy by name."""
     if name not in _FACTORIES:
         raise KeyError(f"cv strategy '{name}' not in registry; known: {sorted(_FACTORIES)}")
-    return _FACTORIES[name](n_splits=n_splits, random_state=random_state, **kwargs)
+    return _FACTORIES[name](n_splits=n_splits, random_state=random_state, shuffle=shuffle)
 
 
 def list_strategies() -> list[str]:
