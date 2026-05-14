@@ -10,8 +10,12 @@ token counts so the harness can compute cost via the CostLedger.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from kaggle_slayer.agent.cost_ledger import CostLedger
 
 
 @dataclass(frozen=True)
@@ -58,3 +62,106 @@ class LLMClient(Protocol):
         model: str | None = None,
     ) -> Response:
         ...
+
+
+class TransientLLMError(Exception):
+    """Retryable error — rate limit, timeout, transient 5xx, etc."""
+
+
+def _make_genai_client(api_key: str) -> Any:  # noqa: ANN401 — google-genai is loosely typed
+    """Construct a google-genai Client. Factored out so tests can patch it."""
+    from google import genai  # noqa: PLC0415
+
+    return genai.Client(api_key=api_key)
+
+
+def _messages_to_genai_contents(messages: list[Message]) -> str:
+    """Flatten messages to the simple string form Gemini accepts for now.
+
+    Week 3 will replace this with the structured contents-array form once we
+    have multi-turn conversations and tool messages to encode.
+    """
+    parts = []
+    for m in messages:
+        prefix = {"user": "USER", "model": "MODEL", "system": "SYSTEM", "tool": "TOOL"}.get(
+            m.role, m.role.upper()
+        )
+        parts.append(f"{prefix}: {m.content}")
+    return "\n\n".join(parts)
+
+
+def _is_transient(err: Exception) -> bool:
+    if isinstance(err, TransientLLMError):
+        return True
+    msg = str(err).lower()
+    return any(s in msg for s in ("rate limit", "timeout", "temporarily", "503", "429", "500", "502", "504"))
+
+
+class GeminiClient:
+    """Concrete LLMClient for Google Gemini via google-genai."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        ledger: CostLedger,
+        competition: str,
+        default_model: str = "gemini-2.5-flash",
+        retry_max: int = 3,
+        retry_base_delay_s: float = 1.0,
+    ) -> None:
+        self._client = _make_genai_client(api_key)
+        self._ledger = ledger
+        self._competition = competition
+        self._default_model = default_model
+        self._retry_max = retry_max
+        self._retry_base_delay_s = retry_base_delay_s
+
+    def call(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+    ) -> Response:
+        _ = tools  # Tool-use schema translation lands in Week 3
+        chosen_model = model or self._default_model
+        contents = _messages_to_genai_contents(messages)
+
+        last_err: Exception | None = None
+        raw = None
+        for attempt in range(self._retry_max + 1):
+            try:
+                raw = self._client.models.generate_content(
+                    model=chosen_model,
+                    contents=contents,
+                )
+                break
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                if not _is_transient(e) or attempt == self._retry_max:
+                    raise
+                delay = self._retry_base_delay_s * (2 ** attempt)
+                time.sleep(delay)
+        if raw is None:
+            raise last_err or RuntimeError("unreachable")
+
+        usage = raw.usage_metadata
+        u = Usage(
+            input_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
+            output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
+            cached_tokens=int(getattr(usage, "cached_content_token_count", 0) or 0),
+        )
+        self._ledger.record(
+            model=chosen_model,
+            input_tokens=u.input_tokens,
+            output_tokens=u.output_tokens,
+            cached_tokens=u.cached_tokens,
+            competition=self._competition,
+        )
+        return Response(
+            text=(raw.text or "").strip(),
+            tool_calls=[],  # parsing tool-call parts lands in Week 3
+            usage=u,
+            raw=raw,
+        )

@@ -6,7 +6,12 @@ land in Task 9.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from kaggle_slayer.agent import llm_client as llm
+from kaggle_slayer.agent.cost_ledger import CostLedger
 
 
 def test_message_dataclass():
@@ -45,3 +50,98 @@ def test_llm_client_protocol_exposes_call():
     protocol object exists and exposes the expected name.
     """
     assert hasattr(llm.LLMClient, "call")
+
+
+def _fake_genai_response(text: str, in_tok: int = 10, out_tok: int = 5, cached_tok: int = 0):
+    resp = MagicMock()
+    resp.text = text
+    candidate = MagicMock()
+    candidate.content.parts = []  # no tool calls
+    resp.candidates = [candidate]
+    usage = MagicMock()
+    usage.prompt_token_count = in_tok
+    usage.candidates_token_count = out_tok
+    usage.cached_content_token_count = cached_tok
+    resp.usage_metadata = usage
+    return resp
+
+
+def test_gemini_client_call_returns_response(tmp_path):
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as mock_factory:
+        client_impl = MagicMock()
+        client_impl.models.generate_content.return_value = _fake_genai_response("hello", 100, 50)
+        mock_factory.return_value = client_impl
+
+        client = llm.GeminiClient(api_key="fake", ledger=ledger, competition="test-comp")
+        resp = client.call(
+            messages=[llm.Message(role="user", content="hi")],
+            model="gemini-2.5-flash",
+        )
+
+    assert resp.text == "hello"
+    assert resp.usage.input_tokens == 100
+    assert resp.usage.output_tokens == 50
+    # Ledger should have one entry attributed to test-comp
+    assert ledger.total_for(competition="test-comp") > 0
+
+
+def test_gemini_client_retries_on_transient_error(tmp_path):
+    """Transient errors (rate limit, 5xx) should retry up to 3 times."""
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as mock_factory:
+        client_impl = MagicMock()
+        # Two transient errors, then success
+        good = _fake_genai_response("ok", 5, 2)
+        client_impl.models.generate_content.side_effect = [
+            llm.TransientLLMError("rate limit"),
+            llm.TransientLLMError("temporarily unavailable"),
+            good,
+        ]
+        mock_factory.return_value = client_impl
+
+        client = llm.GeminiClient(
+            api_key="fake", ledger=ledger, competition="x",
+            retry_max=3, retry_base_delay_s=0.0,
+        )
+        resp = client.call(messages=[llm.Message(role="user", content="hi")])
+
+    assert resp.text == "ok"
+    assert client_impl.models.generate_content.call_count == 3
+
+
+def test_gemini_client_gives_up_after_retry_max(tmp_path):
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as mock_factory:
+        client_impl = MagicMock()
+        client_impl.models.generate_content.side_effect = llm.TransientLLMError("nope")
+        mock_factory.return_value = client_impl
+
+        client = llm.GeminiClient(
+            api_key="fake", ledger=ledger, competition="x",
+            retry_max=2, retry_base_delay_s=0.0,
+        )
+        with pytest.raises(llm.TransientLLMError):
+            client.call(messages=[llm.Message(role="user", content="hi")])
+    assert client_impl.models.generate_content.call_count == 3  # initial + 2 retries
+
+
+def test_gemini_client_does_not_retry_on_permanent_error(tmp_path):
+    """Auth errors, malformed requests, etc. should NOT retry."""
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+
+    class _AuthError(Exception):
+        pass
+
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as mock_factory:
+        client_impl = MagicMock()
+        client_impl.models.generate_content.side_effect = _AuthError("invalid key")
+        mock_factory.return_value = client_impl
+
+        client = llm.GeminiClient(
+            api_key="fake", ledger=ledger, competition="x",
+            retry_max=3, retry_base_delay_s=0.0,
+        )
+        with pytest.raises(_AuthError):
+            client.call(messages=[llm.Message(role="user", content="hi")])
+    assert client_impl.models.generate_content.call_count == 1
