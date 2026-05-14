@@ -1,11 +1,16 @@
 """kaggle-slayer CLI entry point.
 
 Usage:
-    kaggle-slayer <workspace-path> --target <col> [--metric <m>] [--problem-type <p>] [--max-iterations N]
+    kaggle-slayer <workspace-path> --target <col> [--metric <m>] [--problem-type <p>]
+                  [--max-iterations N] [--model <gemini-id>]
 
 This is intentionally thin: parse args, ensure the workspace exists,
 maybe build context.md, then invoke the Solver. Heavy lifting lives in
 kaggle_slayer.agent.solver.Solver.
+
+The Gemini model defaults to `gemini-2.5-flash` (the validated slow-tier
+model). Use `--model gemini-2.5-pro` to opt into Pro (10x cost, subject to
+free-tier quota walls).
 """
 
 from __future__ import annotations
@@ -28,7 +33,10 @@ from kaggle_slayer.harness.workspace import Workspace
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="kaggle-slayer",
-        description="LLM-agent harness for tabular Kaggle competitions.",
+        description=(
+            "LLM-agent harness for tabular Kaggle competitions. "
+            "Defaults to Gemini Flash; override with --model for Pro or other ids."
+        ),
     )
     p.add_argument("workspace_path", help="Path to per-competition workspace (e.g., competitions/titanic)")
     p.add_argument("--target", default=None, help="Target column name")
@@ -36,7 +44,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--problem-type", default="classification", choices=["classification", "regression"])
     p.add_argument("--max-iterations", type=int, default=25)
     p.add_argument("--time-budget-s", type=float, default=900.0)
-    p.add_argument("--model", default="gemini-2.5-pro", help="Gemini model id")
+    p.add_argument(
+        "--model",
+        default="gemini-2.5-flash",
+        help=(
+            "Gemini model id. Defaults to gemini-2.5-flash (the validated "
+            "slow-tier default). Pass gemini-2.5-pro to opt into Pro (10x "
+            "cost, subject to free-tier quota)."
+        ),
+    )
     p.add_argument("--no-context-build", action="store_true",
                    help="Skip rebuilding context.md (use existing one)")
     return p.parse_args(argv)

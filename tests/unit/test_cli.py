@@ -31,6 +31,22 @@ def test_cli_requires_workspace_path():
         cli._parse_args([])
 
 
+def test_cli_default_model_is_flash(tmp_path):
+    """F5: --model defaults to gemini-2.5-flash (the validated slow-tier model).
+
+    Pro is unvalidated and 10x more expensive, plus it hits free-tier quota
+    walls. Flash is the safe default; Pro is opt-in via --model gemini-2.5-pro.
+    """
+    args = cli._parse_args([str(tmp_path / "comp")])
+    assert args.model == "gemini-2.5-flash"
+
+
+def test_cli_model_can_be_overridden(tmp_path):
+    """F5: --model can be overridden to a different Gemini model id."""
+    args = cli._parse_args([str(tmp_path), "--model", "gemini-2.5-pro"])
+    assert args.model == "gemini-2.5-pro"
+
+
 def test_cli_run_creates_workspace_and_calls_solver(tmp_path):
     """run() with a fake LLMClient creates the workspace and invokes the solver."""
     comp_path = tmp_path / "comp"
