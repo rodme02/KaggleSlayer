@@ -227,12 +227,25 @@ class GeminiClient:
         from google.genai import types as gt
 
         chosen_model = model or self._default_model
-        contents = _messages_to_genai_contents(messages)
 
-        config = None
+        # Gemini distinguishes a dedicated system_instruction from in-line
+        # contents. Hoist any role="system" messages out of the conversation
+        # list and concatenate their content (newline-joined) so they ride on
+        # the config instead of being misrepresented as a user turn.
+        system_msgs = [m for m in messages if m.role == "system"]
+        non_system_msgs = [m for m in messages if m.role != "system"]
+        system_instruction: str | None = (
+            "\n".join(m.content for m in system_msgs) if system_msgs else None
+        )
+
+        contents = _messages_to_genai_contents(non_system_msgs)
+
+        config_kwargs: dict[str, Any] = {}
         if tools:
-            gemini_tools = _function_declarations_to_genai_tools(tools)
-            config = gt.GenerateContentConfig(tools=gemini_tools)
+            config_kwargs["tools"] = _function_declarations_to_genai_tools(tools)
+        if system_instruction is not None:
+            config_kwargs["system_instruction"] = system_instruction
+        config = gt.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
         last_err: Exception | None = None
         raw = None

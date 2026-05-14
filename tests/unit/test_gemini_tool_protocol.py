@@ -200,6 +200,69 @@ def test_gemini_strips_unsupported_keys_recursively(tmp_path):
     assert "additional_properties" not in serialized
 
 
+def test_gemini_passes_system_message_as_system_instruction(tmp_path):
+    """A Message(role='system', ...) must be hoisted out of the contents list
+    and passed via GenerateContentConfig(system_instruction=...)."""
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as factory:
+        impl = MagicMock()
+        impl.models.generate_content.return_value = _mock_genai_text_response("ok")
+        factory.return_value = impl
+        client = llm.GeminiClient(api_key="x", ledger=ledger, competition="t", retry_max=0)
+        client.call(messages=[
+            llm.Message(role="system", content="be terse"),
+            llm.Message(role="user", content="hi"),
+        ])
+    call_kwargs = impl.models.generate_content.call_args.kwargs
+    assert "config" in call_kwargs, "system_instruction requires a GenerateContentConfig"
+    cfg = call_kwargs["config"]
+    assert getattr(cfg, "system_instruction", None) == "be terse"
+    # The system message should NOT have leaked into contents
+    contents = call_kwargs["contents"]
+    assert len(contents) == 1, f"system message should be hoisted out; got {len(contents)} contents"
+
+
+def test_gemini_handles_multiple_system_messages_by_concatenating(tmp_path):
+    """Multiple system messages get newline-joined into a single
+    system_instruction string, in order."""
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as factory:
+        impl = MagicMock()
+        impl.models.generate_content.return_value = _mock_genai_text_response("ok")
+        factory.return_value = impl
+        client = llm.GeminiClient(api_key="x", ledger=ledger, competition="t", retry_max=0)
+        client.call(messages=[
+            llm.Message(role="system", content="first system"),
+            llm.Message(role="system", content="second system"),
+            llm.Message(role="user", content="hi"),
+        ])
+    call_kwargs = impl.models.generate_content.call_args.kwargs
+    cfg = call_kwargs["config"]
+    assert getattr(cfg, "system_instruction", None) == "first system\nsecond system"
+    assert len(call_kwargs["contents"]) == 1
+
+
+def test_gemini_system_instruction_combines_with_tools(tmp_path):
+    """system_instruction and tools must coexist on the same config."""
+    ledger = CostLedger(path=tmp_path / "cost.jsonl")
+    with patch("kaggle_slayer.agent.llm_client._make_genai_client") as factory:
+        impl = MagicMock()
+        impl.models.generate_content.return_value = _mock_genai_text_response("ok")
+        factory.return_value = impl
+        client = llm.GeminiClient(api_key="x", ledger=ledger, competition="t", retry_max=0)
+        client.call(
+            messages=[
+                llm.Message(role="system", content="be helpful"),
+                llm.Message(role="user", content="hi"),
+            ],
+            tools=[{"name": "noop", "description": "n", "parameters": {"type": "object", "properties": {}}}],
+        )
+    call_kwargs = impl.models.generate_content.call_args.kwargs
+    cfg = call_kwargs["config"]
+    assert getattr(cfg, "system_instruction", None) == "be helpful"
+    assert getattr(cfg, "tools", None), "tools must still be passed"
+
+
 def test_messages_to_contents_emits_function_call_part_for_model_with_tool_calls():
     """A Message(role='model', tool_calls=[...]) must translate into a Gemini
     Content with role='model' whose first Part exposes a function_call (not text)."""
