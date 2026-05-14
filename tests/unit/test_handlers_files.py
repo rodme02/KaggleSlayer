@@ -85,6 +85,29 @@ def test_write_file_rejects_protected_paths(ctx):
             fh.write_file(ctx, path=forbidden, content="x")
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["Run_Log.jsonl", "RUN_LOG.JSONL", "NOTES.JSONL", "Context.MD"],
+)
+def test_write_file_rejects_protected_paths_case_insensitive(ctx, name):
+    """F3: protected basenames must match regardless of case."""
+    with pytest.raises(ToolError, match="protected"):
+        fh.write_file(ctx, path=name, content="x")
+
+
+def test_write_file_rejects_empty_path(ctx):
+    """F17: empty path resolves to the workspace root — reject with a
+    clear ToolError, not a generic IsADirectoryError."""
+    with pytest.raises(ToolError, match=r"directory|file path"):
+        fh.write_file(ctx, path="", content="x")
+
+
+def test_write_file_rejects_directory_path(ctx):
+    """F17: a path that resolves to an existing directory must be rejected."""
+    with pytest.raises(ToolError, match=r"directory|file path"):
+        fh.write_file(ctx, path="agent", content="x")
+
+
 def test_sample_rows_returns_first_n_rows(ctx):
     df = pd.DataFrame({"a": range(20), "b": list("abcdefghijklmnopqrst")})
     df.to_csv(ctx.workspace.raw_dir / "train.csv", index=False)

@@ -22,6 +22,9 @@ from kaggle_slayer.agent.tools import ToolError
 from kaggle_slayer.harness.journal import NOTE_CATEGORIES
 
 _PROTECTED_BASENAMES: frozenset[str] = frozenset({"run_log.jsonl", "notes.jsonl", "context.md"})
+"""Lowercased protected basenames. write_file compares `target.name.lower()`
+against this set so case-insensitive filesystems (macOS default, Windows)
+can't sneak in `Run_Log.jsonl` (F3)."""
 
 
 def _resolve_under(workspace_root: Path, rel_path: str) -> Path:
@@ -54,10 +57,25 @@ def read_file(ctx: Any, *, path: str) -> str:
 
 
 def write_file(ctx: Any, *, path: str, content: str) -> str:
-    """Write a file inside the workspace. Protected harness files are rejected."""
+    """Write a file inside the workspace. Protected harness files are rejected.
+
+    F3: protected-basename comparison is case-insensitive (macOS HFS+/APFS
+    and Windows NTFS resolve `Run_Log.jsonl` and `run_log.jsonl` to the
+    same file by default).
+
+    F17: an empty or directory-resolving path raises a typed ToolError
+    rather than a generic IsADirectoryError from pathlib's write_text.
+    """
     target = _resolve_under(ctx.workspace.root, path)
-    if target.name in _PROTECTED_BASENAMES and target.parent == ctx.workspace.root.resolve():
+    if (
+        target.name.lower() in _PROTECTED_BASENAMES
+        and target.parent == ctx.workspace.root.resolve()
+    ):
         raise ToolError(f"path {path!r} is protected (harness writes it)")
+    if target == ctx.workspace.root.resolve() or target.is_dir():
+        raise ToolError(
+            f"path {path!r} resolves to a directory; provide a file path"
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
     return f"wrote {len(content)} bytes to {path}"
