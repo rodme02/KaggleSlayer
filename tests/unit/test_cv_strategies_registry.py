@@ -75,3 +75,62 @@ def test_kfold_forwards_shuffle_kwarg():
     val_idx = folds[0][1]
     # Without shuffle, val indices are contiguous [0..9]
     assert val_idx == list(range(10))
+
+
+def test_get_time_series_split():
+    cv = cv_strategies.get("time_series", n_splits=5)
+    assert cv.name == "time_series"
+    assert cv.n_splits == 5
+
+
+def test_time_series_split_yields_forward_only_folds(synthetic_time_series):
+    train, target_col, _ = synthetic_time_series
+    cv = cv_strategies.get("time_series", n_splits=4)
+    for train_idx, val_idx in cv.split(train, target_col):
+        # Every train index must be strictly less than every val index
+        assert max(train_idx) < min(val_idx)
+
+
+def test_get_group_kfold():
+    cv = cv_strategies.get("group_kfold", n_splits=3, group_col="cat_a")
+    assert cv.name == "group_kfold"
+    assert cv.n_splits == 3
+    assert cv.extra.get("group_col") == "cat_a"
+
+
+def test_group_kfold_respects_group_boundaries(synthetic_binary):
+    train, target_col = synthetic_binary
+    cv = cv_strategies.get("group_kfold", n_splits=3, group_col="cat_a")
+    for train_idx, val_idx in cv.split(train, target_col):
+        train_groups = set(train.iloc[train_idx]["cat_a"])
+        val_groups = set(train.iloc[val_idx]["cat_a"])
+        # No group appears in both train and val of the same fold
+        assert train_groups.isdisjoint(val_groups)
+
+
+def test_group_kfold_requires_group_col():
+    with pytest.raises(ValueError, match="group_col"):
+        cv_strategies.get("group_kfold", n_splits=3)  # no group_col
+
+
+def test_auto_select_picks_time_series_when_date_col_given(synthetic_time_series):
+    train, target_col, date_col = synthetic_time_series
+    cv = cv_strategies.auto_select(
+        problem_type="regression",
+        train_df=train,
+        target_col=target_col,
+        date_col=date_col,
+    )
+    assert cv.name == "time_series"
+
+
+def test_auto_select_picks_group_kfold_when_group_col_given(synthetic_binary):
+    train, target_col = synthetic_binary
+    cv = cv_strategies.auto_select(
+        problem_type="classification",
+        train_df=train,
+        target_col=target_col,
+        group_col="cat_a",
+    )
+    assert cv.name == "group_kfold"
+    assert cv.extra.get("group_col") == "cat_a"
