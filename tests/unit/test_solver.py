@@ -178,6 +178,61 @@ def test_solver_appends_model_message_with_tool_calls(tmp_path):
     assert matching, "expected a model message whose first tool_call is take_note"
 
 
+def test_solver_truncates_long_tool_results_in_response_to_llm(tmp_path):
+    """A 20KB tool result must be capped to ~8KB before being fed back to the LLM,
+    with a visible truncation marker so the model knows content was dropped."""
+    from kaggle_slayer.agent.tools import Tool, ToolRegistry
+
+    ws = _make_workspace_and_ctx(tmp_path)
+
+    big_result = "A" * 20_000
+
+    def _big_handler(ctx, **_args):
+        return big_result
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="big",
+        description="produces a huge result",
+        schema={"type": "object", "properties": {}, "additionalProperties": False},
+        handler=_big_handler,
+    ))
+    # Need 'done' so the loop can exit cleanly
+    from kaggle_slayer.agent.handlers import ml as ml_h
+    registry.register(Tool(
+        name="done",
+        description="finish",
+        schema={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+        handler=ml_h.done,
+    ))
+
+    client = _CannedClient(responses=[
+        Response(text="",
+                 tool_calls=[ToolCall(id="t1", name="big", args={})],
+                 usage=Usage(0, 0, 0)),
+        Response(text="",
+                 tool_calls=[ToolCall(id="t2", name="done", args={"summary": "fin"})],
+                 usage=Usage(0, 0, 0)),
+    ])
+    solver = Solver(workspace=ws, llm_client=client, registry=registry, max_iterations=5)
+    solver.solve()
+
+    # The tool-role message in the second turn must be capped
+    second = client.captured[1]
+    tool_msgs = [m for m in second if m.role == "tool"]
+    assert tool_msgs, "expected a tool-role message in the second call"
+    # The serialized payload is JSON-wrapped; even so, the content length must
+    # be well under the raw 20KB and must contain the truncation marker.
+    assert len(tool_msgs[0].content) <= 8500, \
+        f"expected the tool message to be capped (~8KB), got {len(tool_msgs[0].content)}"
+    assert "truncated" in tool_msgs[0].content
+
+
 def test_solver_model_message_precedes_tool_response(tmp_path):
     """The model(tool_call) message must come BEFORE the tool(result) message
     in the second call's history."""

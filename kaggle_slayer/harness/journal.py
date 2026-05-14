@@ -23,6 +23,11 @@ NOTE_CATEGORIES: frozenset[str] = frozenset(
     {"observation", "decision", "hypothesis", "todo"}
 )
 
+# Cap per-arg string size when journalling tool calls. A 5KB write_file content
+# is useful in the LLM transcript but only bloats the audit log. Anything
+# longer is replaced by a marker referencing the original length.
+_JOURNAL_ARG_CAP_CHARS: int = 2048
+
 
 def _now_iso() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
@@ -49,7 +54,7 @@ class Journal:
                 "ts": _now_iso(),
                 "kind": "tool_call",
                 "tool": tool,
-                "args": args,
+                "args": self._summarize_args(args),
                 "result_summary": result_summary,
             },
         )
@@ -67,10 +72,23 @@ class Journal:
                 "ts": _now_iso(),
                 "kind": "tool_error",
                 "tool": tool,
-                "args": args,
+                "args": self._summarize_args(args),
                 "error": error,
             },
         )
+
+    @staticmethod
+    def _summarize_args(args: dict[str, Any]) -> dict[str, Any]:
+        """Return a shallow copy of args with oversized string values replaced
+        by a short truncation marker. Non-string values are passed through
+        unchanged — caps apply only to text payloads that explode the log."""
+        summarized: dict[str, Any] = {}
+        for k, v in args.items():
+            if isinstance(v, str) and len(v) > _JOURNAL_ARG_CAP_CHARS:
+                summarized[k] = f"<truncated, {len(v)} chars>"
+            else:
+                summarized[k] = v
+        return summarized
 
     def iter_records(self) -> Iterator[dict[str, Any]]:
         """Yield every record from run_log.jsonl, in order.

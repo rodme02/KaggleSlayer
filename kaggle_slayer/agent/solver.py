@@ -24,6 +24,13 @@ from kaggle_slayer.agent.tools import ToolError, ToolRegistry
 from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.workspace import Workspace
 
+# Cap on the text we feed back to the LLM per tool result. A 20KB raw output
+# (e.g., a long DataFrame.to_string()) would burn tokens and crowd context.
+# We keep the full result in the registry's actual return value, but show the
+# model only the first ~8KB plus a truncation marker.
+_TOOL_RESULT_CAP_CHARS: int = 8192
+_TOOL_RESULT_KEEP_CHARS: int = 8000
+
 
 @dataclass
 class SolverContext:
@@ -141,7 +148,7 @@ class Solver:
                 args=args,
                 result_summary=text_result[:200],
             )
-            return text_result
+            return _cap_tool_result(text_result)
         except ToolError as e:
             err_msg = f"ToolError: {e}"
             self.journal.log_tool_error(tool=name, args=args, error=err_msg)
@@ -150,3 +157,12 @@ class Solver:
             err_msg = f"unexpected error in {name}: {e!r}"
             self.journal.log_tool_error(tool=name, args=args, error=err_msg)
             return err_msg
+
+
+def _cap_tool_result(text: str) -> str:
+    """If text exceeds the cap, truncate to _TOOL_RESULT_KEEP_CHARS and append
+    a marker telling the model how many bytes were dropped."""
+    if len(text) <= _TOOL_RESULT_CAP_CHARS:
+        return text
+    dropped = len(text) - _TOOL_RESULT_KEEP_CHARS
+    return text[:_TOOL_RESULT_KEEP_CHARS] + f"\n\n[truncated, {dropped} more chars]"

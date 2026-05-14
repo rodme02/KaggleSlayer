@@ -98,6 +98,43 @@ def test_append_before_return_is_durable(fresh_workspace, monkeypatch):
     assert records[0]["tool"] == "profile_data"
 
 
+def test_journal_truncates_long_arg_values(fresh_workspace):
+    """String args longer than the cap (e.g., a 5KB write_file content) must be
+    replaced with a short marker in run_log.jsonl so the journal doesn't bloat."""
+    j = journal_mod.Journal(fresh_workspace)
+    big_content = "y" * 5000
+    j.log_tool_call(
+        tool="write_file",
+        args={"path": "agent/fe.py", "content": big_content},
+        result_summary="ok",
+    )
+    records = list(j.iter_records())
+    assert len(records) == 1
+    rec_args = records[0]["args"]
+    # path is short, untouched
+    assert rec_args["path"] == "agent/fe.py"
+    # content was big, must be replaced by a truncation marker
+    assert rec_args["content"] != big_content
+    assert "truncated" in rec_args["content"]
+    assert "5000" in rec_args["content"]
+
+
+def test_journal_truncates_long_arg_values_in_tool_error(fresh_workspace):
+    """The same truncation must apply to log_tool_error."""
+    j = journal_mod.Journal(fresh_workspace)
+    big_content = "z" * 4000
+    j.log_tool_error(
+        tool="write_file",
+        args={"path": "agent/x.py", "content": big_content},
+        error="boom",
+    )
+    records = list(j.iter_records())
+    assert len(records) == 1
+    rec_args = records[0]["args"]
+    assert rec_args["path"] == "agent/x.py"
+    assert "truncated" in rec_args["content"]
+
+
 def test_iter_records_skips_truncated_trailing_line(fresh_workspace):
     """If the process crashed mid-write, the last line may be partial JSON.
     iter_records must skip it rather than crashing."""
