@@ -80,6 +80,26 @@ class Workspace:
     def notes_path(self) -> Path:
         return self.root / "notes.jsonl"
 
+    def next_version_path(self, kind: str) -> Path:
+        """Return the next free path under versions/ for the given kind.
+
+        kind: "fe" or "model". Scans versions/ for files matching
+        `{kind}_v\\d+.py` and returns `versions/{kind}_v{N+1:02d}.py`.
+        """
+        if kind not in ("fe", "model"):
+            raise ValueError(f"kind must be 'fe' or 'model', got {kind!r}")
+        import re
+
+        pattern = re.compile(rf"^{kind}_v(\d+)\.py$")
+        existing: list[int] = []
+        if self.versions_dir.is_dir():
+            for f in self.versions_dir.iterdir():
+                m = pattern.match(f.name)
+                if m:
+                    existing.append(int(m.group(1)))
+        next_n = (max(existing) + 1) if existing else 1
+        return self.versions_dir / f"{kind}_v{next_n:02d}.py"
+
     @classmethod
     def create(cls, root: Path) -> Workspace:
         """Create the workspace directory structure (idempotent)."""
