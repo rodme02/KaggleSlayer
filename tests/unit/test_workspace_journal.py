@@ -96,3 +96,17 @@ def test_append_before_return_is_durable(fresh_workspace, monkeypatch):
     records = list(j2.iter_records())
     assert len(records) == 1
     assert records[0]["tool"] == "profile_data"
+
+
+def test_iter_records_skips_truncated_trailing_line(fresh_workspace):
+    """If the process crashed mid-write, the last line may be partial JSON.
+    iter_records must skip it rather than crashing."""
+    j = journal_mod.Journal(fresh_workspace)
+    j.log_tool_call(tool="a", args={}, result_summary="ok")
+    j.log_tool_call(tool="b", args={}, result_summary="ok")
+    # Simulate a truncated trailing line (crash before the newline+fsync)
+    with fresh_workspace.run_log_path.open("a") as f:
+        f.write('{"tool":"c","kind":"tool_ca')  # NO newline, NO closing brace
+    records = list(j.iter_records())
+    # Should yield the two complete records and skip the partial one
+    assert [r["tool"] for r in records] == ["a", "b"]

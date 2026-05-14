@@ -73,7 +73,11 @@ class Journal:
         )
 
     def iter_records(self) -> Iterator[dict[str, Any]]:
-        """Yield every record from run_log.jsonl, in order."""
+        """Yield every record from run_log.jsonl, in order.
+
+        A trailing partial line (from a crash mid-write) is silently skipped —
+        the spec §12 resume mechanism depends on this resilience.
+        """
         path = self.workspace.run_log_path
         if not path.exists():
             return
@@ -82,7 +86,11 @@ class Journal:
                 line = line.strip()
                 if not line:
                     continue
-                yield json.loads(line)
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    # Partial trailing write from a crash; skip it.
+                    continue
 
     # --- notes.jsonl ---
 
