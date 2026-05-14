@@ -2,11 +2,19 @@
 
 Week 1 scope: AST lint that scans a Python file before the harness loads
 it and rejects forbidden patterns. The lint is the leak-prevention
-mechanism for the in-process CV contract (see spec §6.5): if an agent
-tries to read `raw/...` directly, the file fails lint and never executes.
+mechanism for the in-process CV contract (see spec §6.5).
 
-Resource limits (subprocess + setrlimit) are added in Week 4 alongside the
-broader sandbox hardening when the agent gets a generic `run_python` tool.
+Threat model: 'agent typos itself into something destructive', not 'agent
+is adversarial'. We catch obvious patterns (os.remove, shutil.rmtree,
+subprocess, etc.) including aliased forms (`import os as o; o.remove(...)`)
+but do NOT defend against deliberate bypasses like:
+  - getattr(os, 'remove')(...)
+  - globals()['os'].remove(...)
+  - __import__('os').remove(...)
+For an adversarial threat model, upgrade to subprocess-isolated execution
+with a real sandbox (Docker, gVisor, or seccomp filter).
+
+Resource limits (subprocess + setrlimit) are added in Week 4.
 """
 
 from __future__ import annotations
