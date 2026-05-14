@@ -112,15 +112,45 @@ def _messages_to_genai_contents(messages: list[Message]) -> list[Any]:
     return contents
 
 
+# JSON-schema keys Gemini's OpenAPI subset doesn't accept. We strip them when
+# serializing to the Gemini wire format, but keep them in the local registry
+# so the in-process jsonschema validator can still enforce them.
+_GEMINI_UNSUPPORTED_SCHEMA_KEYS: frozenset[str] = frozenset({
+    "additionalProperties",
+    "$schema",
+    "$id",
+    "$ref",
+    "definitions",
+    "$defs",
+})
+
+
+def _strip_gemini_unsupported(schema: Any) -> Any:
+    """Recursively drop JSON-schema fields Gemini's OpenAPI subset rejects."""
+    if isinstance(schema, dict):
+        return {
+            k: _strip_gemini_unsupported(v)
+            for k, v in schema.items()
+            if k not in _GEMINI_UNSUPPORTED_SCHEMA_KEYS
+        }
+    if isinstance(schema, list):
+        return [_strip_gemini_unsupported(item) for item in schema]
+    return schema
+
+
 def _function_declarations_to_genai_tools(declarations: list[dict[str, Any]]) -> list[Any]:
-    """Translate our generic function-declaration list to Gemini's Tool list."""
+    """Translate our generic function-declaration list to Gemini's Tool list.
+
+    Strips JSON-schema fields Gemini doesn't accept (e.g., additionalProperties)
+    while keeping them in our local registry for in-process validation.
+    """
     from google.genai import types as gt
 
     decls = [
         gt.FunctionDeclaration(
             name=d["name"],
             description=d.get("description", ""),
-            parameters=d.get("parameters"),
+            parameters=_strip_gemini_unsupported(d.get("parameters")),
         )
         for d in declarations
     ]
