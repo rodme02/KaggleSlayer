@@ -229,6 +229,41 @@ def test_submit_local_includes_id_column_from_test(comp_ctx):
     assert len(sub) == 50
 
 
+def test_submit_local_emits_one_column_per_class_for_multiclass_proba(tmp_path):
+    """F6: with a multi-class needs_proba metric (logloss), submit_local
+    must write one column per class instead of stuffing arrays into one
+    cell. Columns: id, target_0, target_1, target_2. Each row sums ~= 1.
+    """
+    import numpy as np
+
+    ws = Workspace.create(root=tmp_path / "comp")
+    rng = np.random.default_rng(0)
+    n_train, n_test = 300, 60
+    train_df = pd.DataFrame({
+        "x1": rng.normal(size=n_train),
+        "x2": rng.normal(size=n_train),
+        "target": rng.integers(0, 3, size=n_train),
+    })
+    train_df.to_csv(ws.raw_dir / "train.csv", index=False)
+    test_df = pd.DataFrame({
+        "id": range(n_test),
+        "x1": rng.normal(size=n_test),
+        "x2": rng.normal(size=n_test),
+    })
+    test_df.to_csv(ws.raw_dir / "test.csv", index=False)
+    _write_stub_fe(ws)
+    _write_stub_model(ws)
+    ctx = _Ctx(workspace=ws, journal=Journal(ws), metric_name="logloss")
+
+    ml_h.submit_local(ctx, label="mc")
+    sub_path = next(ws.submissions_dir.glob("*mc*.csv"))
+    sub = pd.read_csv(sub_path)
+    assert list(sub.columns) == ["id", "target_0", "target_1", "target_2"]
+    assert len(sub) == n_test
+    sums = sub[["target_0", "target_1", "target_2"]].sum(axis=1)
+    np.testing.assert_allclose(sums.to_numpy(), 1.0, atol=1e-6)
+
+
 def test_submit_local_requires_fe_and_model(comp_ctx):
     comp_ctx.workspace.fe_path.unlink()
     with pytest.raises(ToolError, match="fe.py"):

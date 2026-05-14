@@ -160,9 +160,15 @@ def submit_local(ctx: Any, *, label: str) -> str:
     metric = metrics.get(ctx.metric_name)
     model = model_mod.fit_model(X_train, y_train, ctx.problem_type, metric.name)
 
+    multiclass_proba: bool = False
     if metric.needs_proba and hasattr(model, "predict_proba"):
         proba = model.predict_proba(X_test)
-        preds = proba[:, 1] if proba.ndim == 2 and proba.shape[1] == 2 else proba
+        if proba.ndim == 2 and proba.shape[1] > 2:
+            # F6: K>2 classes — emit one column per class so each row stays 1-D.
+            multiclass_proba = True
+            preds = proba
+        else:
+            preds = proba[:, 1] if proba.ndim == 2 and proba.shape[1] == 2 else proba
     else:
         preds = model.predict(X_test)
 
@@ -170,7 +176,14 @@ def submit_local(ctx: Any, *, label: str) -> str:
     out = pd.DataFrame()
     if id_col is not None:
         out[id_col] = test_df[id_col].values
-    out[ctx.target_col] = preds
+    if multiclass_proba:
+        # Columns: target_0, target_1, ..., target_{k-1}. Naming is documented
+        # in agent/prompts/system.md so the agent can author models that
+        # cooperate with this layout.
+        for k in range(preds.shape[1]):
+            out[f"{ctx.target_col}_{k}"] = preds[:, k]
+    else:
+        out[ctx.target_col] = preds
 
     stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%d_%H%M%S")
     out_path = ctx.workspace.submissions_dir / f"{stamp}_{label}.csv"
