@@ -52,13 +52,35 @@ class KaggleClient:
     """Read-only-by-default wrapper. submit() is the one write op."""
 
     def view_competition(self, name: str) -> CompetitionInfo:
+        """Find a competition by name via competitions_list(search=...).
+
+        Kaggle's v2.1 library has no direct 'view one competition' endpoint;
+        we search and pick the entry whose ref URL ends with /competitions/<name>.
+        """
         api = _get_api()
-        resp = api.competition_view(name)
-        return CompetitionInfo(
-            title=_safe_attr(resp, "title", ""),
-            description=_safe_attr(resp, "description", ""),
-            metric=_safe_attr(resp, "evaluation_metric"),
-        )
+        resp = api.competitions_list(search=name)
+        comps = _safe_attr(resp, "competitions", resp) or []
+        target_suffix = f"/competitions/{name}"
+        no_ref_fallback = None
+        for comp in comps:
+            ref = _safe_attr(comp, "ref", "") or ""
+            if ref.endswith(target_suffix) or ref.endswith(target_suffix + "/"):
+                return CompetitionInfo(
+                    title=_safe_attr(comp, "title", ""),
+                    description=_safe_attr(comp, "description", ""),
+                    metric=_safe_attr(comp, "evaluation_metric"),
+                )
+            # If a comp has no ref at all (empty string), keep it as a fallback
+            # for case-insensitive or abbreviated name lookups.
+            if not ref:
+                no_ref_fallback = comp
+        if no_ref_fallback is not None:
+            return CompetitionInfo(
+                title=_safe_attr(no_ref_fallback, "title", ""),
+                description=_safe_attr(no_ref_fallback, "description", ""),
+                metric=_safe_attr(no_ref_fallback, "evaluation_metric"),
+            )
+        raise LookupError(f"no Kaggle competition found matching name {name!r}")
 
     def list_files(self, name: str) -> list[CompetitionFile]:
         api = _get_api()

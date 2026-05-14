@@ -22,30 +22,66 @@ def mock_api(monkeypatch):
 
 
 def test_client_view_competition(mock_api):
+    comp = MagicMock()
+    comp.title = "Titanic - Machine Learning from Disaster"
+    comp.description = "Predict survival on the Titanic..."
+    comp.evaluation_metric = "Categorization Accuracy"
+    comp.ref = "https://www.kaggle.com/competitions/titanic"
+
+    other = MagicMock()
+    other.title = "Other Comp"
+    other.description = "..."
+    other.evaluation_metric = "rmse"
+    other.ref = "https://www.kaggle.com/competitions/other"
+
     resp = MagicMock()
-    resp.title = "Titanic - Machine Learning from Disaster"
-    resp.description = "Predict survival on the Titanic..."
-    resp.evaluation_metric = "accuracy"
-    mock_api.competition_view.return_value = resp
+    resp.competitions = [other, comp]
+    mock_api.competitions_list.return_value = resp
 
     client = kc_mod.KaggleClient()
     info = client.view_competition("titanic")
 
-    mock_api.competition_view.assert_called_once_with("titanic")
+    # competitions_list should be called with the search kwarg
+    mock_api.competitions_list.assert_called_once_with(search="titanic")
     assert info.title.startswith("Titanic")
     assert info.description.startswith("Predict")
-    assert info.metric == "accuracy"
+    assert info.metric == "Categorization Accuracy"
 
 
 def test_client_view_competition_handles_missing_metric(mock_api):
-    resp = MagicMock(spec=["title", "description"])
-    resp.title = "Untitled Comp"
-    resp.description = "..."
-    mock_api.competition_view.return_value = resp
+    comp = MagicMock(spec=["title", "description", "ref"])
+    comp.title = "Untitled Comp"
+    comp.description = "..."
+    comp.ref = "https://www.kaggle.com/competitions/foo"
+    resp = MagicMock()
+    resp.competitions = [comp]
+    mock_api.competitions_list.return_value = resp
 
     client = kc_mod.KaggleClient()
     info = client.view_competition("foo")
     assert info.metric is None
+
+
+def test_client_view_competition_no_match_raises(mock_api):
+    """If no comp's ref matches the requested name, raise a clear error."""
+    other = MagicMock()
+    other.ref = "https://www.kaggle.com/competitions/different"
+    resp = MagicMock()
+    resp.competitions = [other]
+    mock_api.competitions_list.return_value = resp
+
+    client = kc_mod.KaggleClient()
+    with pytest.raises(LookupError, match="titanic"):
+        client.view_competition("titanic")
+
+
+def test_client_view_competition_empty_results_raises(mock_api):
+    resp = MagicMock()
+    resp.competitions = []
+    mock_api.competitions_list.return_value = resp
+    client = kc_mod.KaggleClient()
+    with pytest.raises(LookupError):
+        client.view_competition("nonexistent")
 
 
 def test_client_list_files(mock_api):
