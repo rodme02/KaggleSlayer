@@ -59,8 +59,12 @@ _PATH_OPEN_CALLS: frozenset[tuple[str, ...]] = frozenset({
 })
 
 # Absolute filesystem paths the agent must never try to open (any mode).
+# /Users/, /home/, /private/ are intentionally excluded: the workspace lives
+# under one of these on macOS (/Users/) and Linux (/home/), and macOS also
+# maps /tmp → /private/var/... Agent code may legitimately reference workspace
+# paths under those prefixes. /etc/, /var/, /usr/, /root/ remain forbidden.
 _FORBIDDEN_ABS_PATHS: tuple[str, ...] = (
-    "/etc/", "/var/", "/usr/", "/private/", "/Users/", "/root/", "/home/",
+    "/etc/", "/var/", "/usr/", "/root/",
 )
 
 

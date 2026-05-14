@@ -169,6 +169,31 @@ def test_lint_aggregates_multiple_violations(tmp_path):
     assert len(result.violations) >= 2
 
 
+def test_lint_allows_open_of_workspace_user_path(tmp_path):
+    """Workspace paths under /Users/, /home/, /private/ must lint clean
+    (the workspace lives under one of these on macOS/Linux)."""
+    p = _write(tmp_path, "fe.py", """
+        def fit_feature_transformer(train_df, target_col):
+            with open("/Users/rodrigomedeiros/Projetos/KaggleSlayer/competitions/foo/notes.txt") as f:
+                pass
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert result.ok, result.violations
+
+
+def test_lint_still_rejects_etc_passwd(tmp_path):
+    """The /etc denylist remains active."""
+    p = _write(tmp_path, "bad.py", """
+        def fit_feature_transformer(train_df, target_col):
+            open("/etc/passwd", "w")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("/etc" in v for v in result.violations)
+
+
 def test_lint_catches_os_remove_even_when_os_path_was_imported(tmp_path):
     """import os.path must not defeat the os.* denylist."""
     p = _write(tmp_path, "bad.py", """
