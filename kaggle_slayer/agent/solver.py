@@ -97,7 +97,7 @@ class Solver:
             competition=workspace.name,
         )
 
-    def solve(self) -> SolveResult:
+    def solve(self, *, resume_from: list[Message] | None = None) -> SolveResult:
         system_prompt = load_system_prompt()
         context_md = (
             self.workspace.context_path.read_text()
@@ -105,10 +105,18 @@ class Solver:
             else "(no context.md yet)"
         )
 
-        messages: list[Message] = [
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=context_md),
-        ]
+        messages: list[Message]
+        if resume_from:
+            messages = [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=context_md),
+                *resume_from,
+            ]
+        else:
+            messages = [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=context_md),
+            ]
         tool_decls = self.registry.to_function_declarations()
 
         started = time.perf_counter()

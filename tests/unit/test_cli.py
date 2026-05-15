@@ -8,6 +8,8 @@ import pandas as pd
 import pytest
 
 from kaggle_slayer import cli
+from kaggle_slayer.harness.journal import Journal
+from kaggle_slayer.harness.workspace import Workspace
 
 
 def test_cli_parses_args(tmp_path):
@@ -107,3 +109,48 @@ def test_cli_run_exits_nonzero_when_solver_does_not_finish(tmp_path):
 
         exit_code = cli.run([str(comp_path), "--target", "y"])
     assert exit_code != 0
+
+
+def test_cli_parses_resume_flag(tmp_path):
+    args = cli._parse_args([str(tmp_path / "comp"), "--resume", "--target", "y"])
+    assert args.resume is True
+
+
+def test_cli_parses_cost_budget_flag(tmp_path):
+    args = cli._parse_args([str(tmp_path / "comp"), "--cost-budget", "0.25", "--target", "y"])
+    assert args.cost_budget == 0.25
+
+
+def test_cli_parses_auto_approve_flag(tmp_path):
+    args = cli._parse_args([str(tmp_path / "comp"), "--auto-approve", "safe", "--target", "y"])
+    assert args.auto_approve == "safe"
+
+
+def test_cli_resume_passes_rebuilt_history_to_solver(tmp_path):
+    """When --resume is set and run_log.jsonl has prior tool calls, those
+    messages are passed via solve(resume_from=...)."""
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    (comp_path / "raw").mkdir()
+    pd.DataFrame({"x": [1, 2], "y": [0, 1]}).to_csv(comp_path / "raw" / "train.csv", index=False)
+    pd.DataFrame({"id": [1], "x": [1]}).to_csv(comp_path / "raw" / "test.csv", index=False)
+    # Seed a journal entry that the resume should pick up
+    ws = Workspace.create(root=comp_path)
+    Journal(ws).log_tool_call(tool="take_note", args={"category": "observation", "content": "x"}, result_summary="noted")
+
+    with patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(status="done", iterations=1, summary="ok")
+        mock_solver_cls.return_value = mock_solver
+
+        cli.run([str(comp_path), "--target", "y", "--resume"])
+
+    # solve() was called with resume_from=<rebuilt history>
+    call_kwargs = mock_solver.solve.call_args.kwargs
+    assert "resume_from" in call_kwargs
+    assert call_kwargs["resume_from"] is not None
+    assert len(call_kwargs["resume_from"]) >= 2  # at least one model + tool message

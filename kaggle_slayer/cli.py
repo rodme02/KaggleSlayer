@@ -26,6 +26,7 @@ from kaggle_slayer.agent.cost_ledger import CostLedger
 from kaggle_slayer.agent.llm_client import GeminiClient
 from kaggle_slayer.agent.solver import Solver
 from kaggle_slayer.harness.context import build_context
+from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.kaggle_client import KaggleClient
 from kaggle_slayer.harness.workspace import Workspace
 
@@ -55,6 +56,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument("--no-context-build", action="store_true",
                    help="Skip rebuilding context.md (use existing one)")
+    p.add_argument("--resume", action="store_true",
+                   help="Resume from run_log.jsonl (rebuilds conversation history)")
+    p.add_argument("--cost-budget", type=float, default=None,
+                   help="USD cost cap; checkpoint fires when exceeded")
+    p.add_argument("--auto-approve", choices=["off", "safe", "all"], default="off",
+                   help="Checkpoint mode: off=interactive, safe=auto-approve non-regression submits only, all=auto-approve everything (tests only)")
     return p.parse_args(argv)
 
 
@@ -87,6 +94,30 @@ def run(argv: list[str]) -> int:
         competition=workspace.name,
         default_model=args.model,
     )
+
+    # Checkpoint handler
+    from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
+    if args.auto_approve == "safe":
+        handler = cp.CheckpointHandler(mode=cp.HandlerMode.AUTO_SAFE, journal=Journal(workspace))
+    elif args.auto_approve == "all":
+        handler = cp.CheckpointHandler(
+            mode=cp.HandlerMode.STUB,
+            journal=Journal(workspace),
+            stub_decision=cp.Decision.APPROVE,
+        )
+    else:
+        handler = cp.CheckpointHandler(mode=cp.HandlerMode.INTERACTIVE, journal=Journal(workspace))
+
+    # Resume?
+    resume_from = None
+    if args.resume:
+        from kaggle_slayer.harness import resume as resume_mod  # noqa: PLC0415
+        try:
+            resume_from = resume_mod.rebuild_conversation(workspace)
+        except resume_mod.ResumeError as e:
+            print(f"resume failed: {e}", file=sys.stderr)
+            return 3
+
     solver = Solver(
         workspace=workspace,
         llm_client=llm,
@@ -95,8 +126,12 @@ def run(argv: list[str]) -> int:
         metric_name=args.metric,
         max_iterations=args.max_iterations,
         time_budget_s=args.time_budget_s,
+        checkpoint_handler=handler,
+        cost_ledger=ledger,
+        cost_budget_usd=args.cost_budget,
+        kaggle_client=KaggleClient(),
     )
-    result = solver.solve()
+    result = solver.solve(resume_from=resume_from)
 
     print(f"\nstatus: {result.status}")
     print(f"iterations: {result.iterations}")
