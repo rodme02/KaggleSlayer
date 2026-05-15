@@ -1,9 +1,9 @@
 """Workspace resume / inspection helpers.
 
-For Week 2 this is a read-only summary: count tool calls, detect stuck
-loops, return the last call. Week 4 will extend it to rebuild the
-Solver's conversation history so an aborted run can pick up where it
-left off.
+Week 2 added a read-only summary: count tool calls, detect stuck loops,
+return the last call. Week 4 extended this with `rebuild_conversation`,
+which replays `run_log.jsonl` as the Message history the Solver
+originally sent — so an aborted run can be resumed.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from kaggle_slayer.agent.llm_client import Message, ToolCall
 from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.workspace import Workspace
 
@@ -62,3 +63,57 @@ def summarize(workspace: Workspace, *, stuck_window: int = 10, stuck_threshold: 
                 "window": stuck_window,
             }
     return summary
+
+
+class ResumeError(Exception):
+    """Raised when the journal is in a state from which we cannot resume."""
+
+
+def rebuild_conversation(workspace: Workspace) -> list[Message]:
+    """Replay run_log.jsonl as the Message history the Solver originally sent.
+
+    For each tool_call / tool_error record:
+      - emit a model(role) Message with that call's tool_calls=[ToolCall(...)]
+      - emit a tool(role) Message with the result (or the error string)
+
+    checkpoint records are ignored (they're not part of the LLM conversation).
+    Raises ResumeError if the last tool_call was 'done' (workspace finished).
+    """
+    j = Journal(workspace)
+    records = list(j.iter_records())
+    if not records:
+        return []
+
+    # Look at the last tool_call (skipping checkpoint records) — if it's `done`,
+    # the run is finished and there's nothing to resume.
+    last_tool_record = next(
+        (r for r in reversed(records) if r.get("kind") in ("tool_call", "tool_error")),
+        None,
+    )
+    if last_tool_record is not None and last_tool_record.get("tool") == "done":
+        raise ResumeError(
+            "workspace already finished (last tool call was 'done'); "
+            "delete run_log.jsonl to start fresh"
+        )
+
+    messages: list[Message] = []
+    for rec in records:
+        kind = rec.get("kind")
+        if kind == "tool_call":
+            tool_name = rec.get("tool", "unknown")
+            args = rec.get("args", {})
+            result = rec.get("result_summary", "")
+            tc = ToolCall(id=f"resume_{len(messages)}", name=tool_name, args=args)
+            messages.append(Message(role="model", content="", tool_calls=[tc]))
+            payload = json.dumps({"tool": tool_name, "result": result})
+            messages.append(Message(role="tool", content=payload))
+        elif kind == "tool_error":
+            tool_name = rec.get("tool", "unknown")
+            args = rec.get("args", {})
+            error = rec.get("error", "")
+            tc = ToolCall(id=f"resume_{len(messages)}", name=tool_name, args=args)
+            messages.append(Message(role="model", content="", tool_calls=[tc]))
+            payload = json.dumps({"tool": tool_name, "result": error})
+            messages.append(Message(role="tool", content=payload))
+        # kind=='checkpoint' is silently skipped
+    return messages
