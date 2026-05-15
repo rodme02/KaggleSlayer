@@ -32,8 +32,11 @@ def ctx(tmp_path):
 
 def test_builtin_registry_has_expected_tools(ctx):
     reg = make_builtin_registry()
-    expected = {"read_context", "read_file", "write_file", "sample_rows",
-                "take_note", "set_cv", "train_cv", "submit_local", "done"}
+    expected = {
+        "read_context", "read_file", "write_file", "sample_rows",
+        "take_note", "set_cv", "train_cv", "submit_local", "done",
+        "run_python", "set_metric", "submit_kaggle", "request_human_approval",
+    }
     assert set(reg.names()) == expected
 
 
@@ -54,7 +57,7 @@ def test_builtin_registry_function_declarations_format(ctx):
     """All declarations have name + description + parameters keys, JSON-schema shape."""
     reg = make_builtin_registry()
     decls = reg.to_function_declarations()
-    assert len(decls) == 9
+    assert len(decls) == 13
     for d in decls:
         assert d["name"]
         assert d["description"]

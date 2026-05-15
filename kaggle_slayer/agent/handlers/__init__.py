@@ -1,13 +1,14 @@
 """Tool handlers — pure Python callables registered into a ToolRegistry.
 
 make_builtin_registry() returns a ToolRegistry pre-loaded with the
-9 builtin tools the Solver uses in Week 3.
+13 builtin tools the Solver uses in Week 4.
 """
 
 from __future__ import annotations
 
 from kaggle_slayer.agent.handlers import files as fh
 from kaggle_slayer.agent.handlers import ml as ml_h
+from kaggle_slayer.agent.handlers import python as ph_python
 from kaggle_slayer.agent.tools import Tool, ToolRegistry
 
 
@@ -145,5 +146,77 @@ def make_builtin_registry() -> ToolRegistry:
             "additionalProperties": False,
         },
         handler=ml_h.done,
+    ))
+    reg.register(Tool(
+        name="run_python",
+        description=(
+            "Run a Python snippet in a sandboxed subprocess (resource-limited, "
+            "cwd=workspace root). Use for plotting, peeks, quick debug. Returns "
+            "stdout/stderr/returncode as a string. Do NOT use for CV — train_cv "
+            "is the only path to a valid CV score."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python source to execute"},
+                "timeout_s": {"type": "integer", "minimum": 1, "maximum": 600, "default": 60},
+                "memory_mb": {"type": "integer", "minimum": 64, "maximum": 16384, "default": 2048},
+            },
+            "required": ["code"],
+            "additionalProperties": False,
+        },
+        handler=ph_python.run_python,
+    ))
+    reg.register(Tool(
+        name="set_metric",
+        description=(
+            "Change the scoring metric. Checkpoint-gated. Use when the parsed "
+            "metric is wrong (e.g., comp uses weighted F1 but the harness picked "
+            "accuracy). Pick from accuracy/auc/logloss/rmse/mae/r2."
+        ),
+        schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        handler=ml_h.set_metric,
+    ))
+    reg.register(Tool(
+        name="submit_kaggle",
+        description=(
+            "Push a submission CSV to Kaggle. Checkpoint-gated (always for the "
+            "first submission of a comp; on score regression for subsequent ones). "
+            "csv_path is workspace-relative."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "csv_path": {"type": "string"},
+                "message": {"type": "string"},
+            },
+            "required": ["csv_path", "message"],
+            "additionalProperties": False,
+        },
+        handler=ml_h.submit_kaggle,
+    ))
+    reg.register(Tool(
+        name="request_human_approval",
+        description=(
+            "Pause and ask the human for explicit approval before proceeding. "
+            "Use when you're about to take an action whose stakes you can't fully "
+            "judge (e.g., a non-obvious metric override, an unusual leak risk). "
+            "evidence_json is a JSON-encoded dict of context the human should see."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "evidence_json": {"type": "string", "default": "{}"},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+        handler=ml_h.request_human_approval,
     ))
     return reg

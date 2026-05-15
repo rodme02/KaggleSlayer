@@ -347,3 +347,28 @@ def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
     if current < prev_best:
         return cp.CheckpointTrigger.SUBMIT_KAGGLE_REGRESSION, prev_best
     return cp.CheckpointTrigger.SUBMIT_KAGGLE_NON_REGRESSION, prev_best
+
+
+def request_human_approval(ctx: Any, *, action: str, evidence_json: str = "{}") -> str:
+    """Agent-initiated checkpoint: pause and ask the human to weigh in."""
+    handler = getattr(ctx, "checkpoint_handler", None)
+    if handler is None:
+        raise ToolError("request_human_approval needs a checkpoint handler on the context")
+
+    import json as _json  # noqa: PLC0415
+
+    from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
+
+    try:
+        evidence = _json.loads(evidence_json) if evidence_json else {}
+        if not isinstance(evidence, dict):
+            evidence = {"value": evidence}
+    except _json.JSONDecodeError:
+        evidence = {"raw_evidence": evidence_json}
+
+    decision = handler.request(cp.CheckpointRequest(
+        trigger=cp.CheckpointTrigger.AGENT_INITIATED,
+        action=action,
+        evidence=evidence,
+    ))
+    return f"decision={decision.value}"

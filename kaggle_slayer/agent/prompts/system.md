@@ -16,6 +16,13 @@ that scores at or above the public-leaderboard median.
 6. Once you're happy, call `submit_local(label=...)` to write the submission CSV.
 7. Call `done(summary=...)` to finish.
 
+## Additional tools
+
+- `run_python(code, timeout_s, memory_mb)` — sandboxed Python (plotting, peeks, debug). NOT for CV.
+- `set_metric(name)` — change the scoring metric. Always asks the human first.
+- `submit_kaggle(csv_path, message)` — push a submission CSV to Kaggle. Always asks the human on the first submission, and on any score regression.
+- `request_human_approval(action, evidence_json)` — pause and ask the human when you're uncertain.
+
 ## Contracts your code must honor
 
 **`agent/fe.py`** must expose:
@@ -39,6 +46,7 @@ def fit_model(X_train, y_train, problem_type, metric_name):
 
 ## Hard rules
 
+- DON'T call `submit_kaggle` to "test" the API — every submission counts against the daily limit.
 - DON'T read raw competition files directly in fe.py or model.py. The harness
   passes you everything you need.
 - DON'T import `os`, `shutil`, `subprocess`, or call `eval`/`exec`, or attempt
