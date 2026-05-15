@@ -53,7 +53,7 @@ class SolverContext:
 
 @dataclass
 class SolveResult:
-    status: str  # "done" | "max_iterations" | "time_exceeded"
+    status: str  # "done" | "max_iterations" | "time_exceeded" | "cost_budget_exceeded"
     iterations: int
     summary: str
 
@@ -72,6 +72,10 @@ class Solver:
         max_iterations: int = 25,
         time_budget_s: float = 900.0,
         registry: ToolRegistry | None = None,
+        checkpoint_handler: Any | None = None,
+        cost_ledger: Any | None = None,
+        cost_budget_usd: float | None = None,
+        kaggle_client: Any | None = None,
     ) -> None:
         self.workspace = workspace
         self.llm = llm_client
@@ -79,12 +83,18 @@ class Solver:
         self.time_budget_s = time_budget_s
         self.registry = registry or make_builtin_registry()
         self.journal = Journal(workspace)
+        self.checkpoint_handler = checkpoint_handler
+        self.cost_ledger = cost_ledger
+        self.cost_budget_usd = cost_budget_usd
         self.ctx = SolverContext(
             workspace=workspace,
             journal=self.journal,
             target_col=target_col,
             problem_type=problem_type,
             metric_name=metric_name,
+            checkpoint_handler=checkpoint_handler,
+            kaggle_client=kaggle_client,
+            competition=workspace.name,
         )
 
     def solve(self) -> SolveResult:
@@ -104,7 +114,13 @@ class Solver:
         started = time.perf_counter()
         for iteration in range(1, self.max_iterations + 1):
             if time.perf_counter() - started > self.time_budget_s:
-                return SolveResult(status="time_exceeded", iterations=iteration - 1, summary="")
+                if not self._gate_wall_clock(iteration - 1):
+                    return SolveResult(status="time_exceeded", iterations=iteration - 1, summary="")
+                # Approved — extend the budget by one more cycle of the original cap.
+                started = time.perf_counter()
+
+            if self._cost_budget_exceeded() and not self._gate_cost_budget():
+                return SolveResult(status="cost_budget_exceeded", iterations=iteration - 1, summary="")
 
             response = self.llm.call(messages=messages, tools=tool_decls)
 
@@ -161,6 +177,38 @@ class Solver:
             err_msg = f"unexpected error in {name}: {e!r}"
             self.journal.log_tool_error(tool=name, args=args, error=err_msg)
             return err_msg
+
+    def _gate_wall_clock(self, iterations_so_far: int) -> bool:
+        """Ask the checkpoint handler to extend the wall-clock budget. True = continue."""
+        if self.checkpoint_handler is None:
+            return False
+        from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
+
+        decision = self.checkpoint_handler.request(cp.CheckpointRequest(
+            trigger=cp.CheckpointTrigger.WALL_CLOCK_BUDGET,
+            action=f"extend wall-clock budget (iter {iterations_so_far})",
+            evidence={"budget_s": self.time_budget_s, "iter": iterations_so_far},
+        ))
+        return decision in (cp.Decision.APPROVE, cp.Decision.SKIP_CHECK)
+
+    def _cost_budget_exceeded(self) -> bool:
+        if self.cost_ledger is None or self.cost_budget_usd is None:
+            return False
+        spent = float(self.cost_ledger.total_for(competition=self.workspace.name))
+        return spent > self.cost_budget_usd
+
+    def _gate_cost_budget(self) -> bool:
+        if self.checkpoint_handler is None or self.cost_ledger is None:
+            return False
+        from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
+
+        spent = float(self.cost_ledger.total_for(competition=self.workspace.name))
+        decision = self.checkpoint_handler.request(cp.CheckpointRequest(
+            trigger=cp.CheckpointTrigger.COST_BUDGET,
+            action="cost budget exceeded — raise it?",
+            evidence={"spent_usd": spent, "budget_usd": self.cost_budget_usd},
+        ))
+        return decision in (cp.Decision.APPROVE, cp.Decision.SKIP_CHECK)
 
 
 def _cap_tool_result(text: str) -> str:

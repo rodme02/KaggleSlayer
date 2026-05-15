@@ -261,3 +261,77 @@ def test_solver_model_message_precedes_tool_response(tmp_path):
     )
     # The model message in slot 2 must be the one carrying tool_calls
     assert second_msgs[2].tool_calls and second_msgs[2].tool_calls[0].name == "take_note"
+
+
+def test_solver_wall_clock_checkpoint_extends_on_approve(tmp_path):
+    """When time_budget_s elapses, checkpoint fires; APPROVE extends by another budget."""
+    from kaggle_slayer.harness import checkpoints as cp
+    from kaggle_slayer.harness.journal import Journal
+
+    ws = _make_workspace_and_ctx(tmp_path)
+    journal = Journal(ws)
+    # The handler approves the first wall-clock checkpoint, denies the second.
+    decisions = iter([cp.Decision.APPROVE, cp.Decision.DENY])
+
+    def prompt(_req):
+        return next(decisions)
+
+    handler = cp.CheckpointHandler(
+        mode=cp.HandlerMode.CALLABLE, journal=journal, prompt_fn=prompt
+    )
+    # Endless thinking-aloud responses; never call done.
+    responses = [Response(text="thinking", tool_calls=[], usage=Usage(0, 0, 0)) for _ in range(50)]
+    client = _CannedClient(responses=responses)
+    solver = Solver(
+        workspace=ws,
+        llm_client=client,
+        max_iterations=50,
+        time_budget_s=0.0,  # immediate — fires on every iteration deterministically
+        checkpoint_handler=handler,
+    )
+    result = solver.solve()
+    # First wall-clock checkpoint approved → continued; second denied → exit.
+    assert result.status == "time_exceeded"
+    # Journal must contain exactly two wall_clock_budget checkpoints.
+    import json
+    cp_records = [
+        json.loads(line) for line in ws.run_log_path.read_text().splitlines()
+        if json.loads(line).get("kind") == "checkpoint"
+    ]
+    wall_cp = [r for r in cp_records if r["trigger"] == "wall_clock_budget"]
+    assert len(wall_cp) == 2
+    assert wall_cp[0]["decision"] == "approve"
+    assert wall_cp[1]["decision"] == "deny"
+
+
+def test_solver_cost_budget_checkpoint(tmp_path):
+    """When cost_ledger.total_for(competition) > cost_budget_usd, checkpoint fires."""
+    from unittest.mock import MagicMock
+
+    from kaggle_slayer.harness import checkpoints as cp
+    from kaggle_slayer.harness.journal import Journal
+
+    ws = _make_workspace_and_ctx(tmp_path)
+    journal = Journal(ws)
+    handler = cp.CheckpointHandler(
+        mode=cp.HandlerMode.STUB, journal=journal, stub_decision=cp.Decision.DENY
+    )
+
+    ledger = MagicMock()
+    ledger.total_for = MagicMock(return_value=0.10)  # already over a $0.05 budget
+
+    responses = [
+        Response(text="thinking", tool_calls=[], usage=Usage(0, 0, 0)) for _ in range(5)
+    ]
+    client = _CannedClient(responses=responses)
+    solver = Solver(
+        workspace=ws,
+        llm_client=client,
+        max_iterations=10,
+        checkpoint_handler=handler,
+        cost_ledger=ledger,
+        cost_budget_usd=0.05,
+    )
+    result = solver.solve()
+    # Denied at first cost-budget check → exit with cost_budget_exceeded.
+    assert result.status == "cost_budget_exceeded"
