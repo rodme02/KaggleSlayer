@@ -45,6 +45,8 @@ class SolverContext:
     cv_params: dict[str, Any] = field(default_factory=dict)
     finished: bool = False
     final_summary: str = ""
+    checkpoint_handler: Any | None = None  # CheckpointHandler; Any to avoid harness import cycle
+    best_cv_mean: float | None = None
 
 
 @dataclass

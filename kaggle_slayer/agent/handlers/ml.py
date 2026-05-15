@@ -224,3 +224,32 @@ def done(ctx: Any, *, summary: str) -> str:
     ctx.finished = True
     ctx.final_summary = summary
     return f"acknowledged: {summary}"
+
+
+def set_metric(ctx: Any, *, name: str) -> str:
+    """Change the scoring metric. Always checkpoint-gated (spec §9)."""
+    # Validate before pestering the user.
+    try:
+        metrics.get(name)
+    except KeyError as e:
+        raise ToolError(f"unknown metric {name!r}; choose from the registry") from e
+
+    handler = getattr(ctx, "checkpoint_handler", None)
+    if handler is None:
+        raise ToolError("set_metric is gated but no checkpoint handler is configured")
+
+    from kaggle_slayer.harness import checkpoints as cp  # local import avoids cycles
+
+    decision = handler.request(cp.CheckpointRequest(
+        trigger=cp.CheckpointTrigger.SET_METRIC,
+        action=f"change metric from {ctx.metric_name!r} to {name!r}",
+        evidence={"current": ctx.metric_name, "proposed": name},
+    ))
+    if decision == cp.Decision.DENY:
+        raise ToolError(f"checkpoint denied set_metric to {name!r}")
+    if decision == cp.Decision.ABORT:
+        raise ToolError("aborted by user at set_metric checkpoint")
+    # APPROVE or SKIP_CHECK — capture the prior name before mutation.
+    previous = ctx.metric_name
+    ctx.metric_name = name
+    return f"metric changed to {name!r} (was {previous!r}, approved by checkpoint)"
