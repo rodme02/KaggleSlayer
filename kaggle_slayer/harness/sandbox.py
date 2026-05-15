@@ -14,14 +14,24 @@ but do NOT defend against deliberate bypasses like:
 For an adversarial threat model, upgrade to subprocess-isolated execution
 with a real sandbox (Docker, gVisor, or seccomp filter).
 
-Resource limits (subprocess + setrlimit) are added in Week 4.
+Resource limits (subprocess + setrlimit) ship in `run_subprocess` below —
+used by the `run_python` tool. Note: macOS does not reliably enforce
+RLIMIT_AS; the memory cap is a best-effort on Darwin and a hard cap on
+Linux.
 """
 
 from __future__ import annotations
 
 import ast
+import contextlib
+import datetime as _dt
+import resource as _resource  # POSIX-only; we don't support Windows
+import subprocess as _subprocess
+import sys as _sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from kaggle_slayer.harness.workspace import Workspace as _Workspace
 
 # Module-prefix denylist: any `X.Y.Z(...)` whose dotted attribute chain
 # starts with one of these tuples is rejected. We match against the
@@ -212,3 +222,99 @@ class _ForbidVisitor(ast.NodeVisitor):
                 self._violate(
                     f"forbidden open of absolute system path: {value!r}", node
                 )
+
+
+@dataclass(frozen=True)
+class SubprocessResult:
+    """Outcome of run_subprocess: captured streams + classification.
+
+    killed_reason is one of:
+      None      — clean exit (success or non-zero rc with normal termination)
+      "timeout" — wall-clock cap hit
+      "memory"  — RLIMIT_AS triggered the kill (heuristic: SIGKILL on Linux)
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+    killed_reason: str | None
+    script_path: Path
+
+
+def _preexec_setrlimit(memory_bytes: int, cpu_seconds: int) -> None:
+    """preexec_fn payload — POSIX-only. Sets per-process limits before exec.
+
+    Errors from RLIMIT_AS are swallowed because Darwin rejects the call with
+    "current limit exceeds maximum limit" (the inherited soft limit on macOS
+    can exceed any value setrlimit will accept); we still try the call so
+    Linux gets a hard cap. RLIMIT_CPU works on both platforms.
+    """
+    # Memory cap (address space). macOS often rejects RLIMIT_AS; degrade silently.
+    with contextlib.suppress(OSError, ValueError):
+        _resource.setrlimit(_resource.RLIMIT_AS, (memory_bytes, memory_bytes))
+    # CPU-time cap as a backstop against busy loops the wall-clock timeout might
+    # race with (e.g., kernel scheduling slop). Same value as wall-clock for now.
+    _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+
+
+def run_subprocess(
+    *,
+    code: str,
+    workspace: _Workspace,
+    timeout_s: int = 60,
+    memory_mb: int = 2048,
+) -> SubprocessResult:
+    """Run Python `code` in an isolated subprocess scoped to the workspace.
+
+    Writes `code` to `workspace.scratch_dir/run_<ts>.py` for debuggability,
+    invokes `python <script>` with `cwd=workspace.root`, applies RLIMIT_AS
+    and RLIMIT_CPU via preexec_fn, and enforces wall-clock via subprocess
+    `timeout`. Returns a SubprocessResult capturing stdout/stderr/returncode
+    and a `killed_reason` string for timeout/memory kills.
+
+    The caller is responsible for AST-linting `code` first (e.g., by writing
+    it to a file and calling `lint_module`). This function does not lint.
+    """
+    workspace.scratch_dir.mkdir(parents=True, exist_ok=True)
+    stamp = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%d_%H%M%S_%f")
+    script_path = workspace.scratch_dir / f"run_{stamp}.py"
+    script_path.write_text(code)
+
+    memory_bytes = max(1, memory_mb) * 1024 * 1024
+    preexec = None
+    if _sys.platform != "win32":
+        # Bind the two arguments at closure-construction time.
+        def preexec() -> None:  # noqa: ANN202 — used only by subprocess
+            _preexec_setrlimit(memory_bytes, timeout_s)
+
+    try:
+        completed = _subprocess.run(
+            [_sys.executable, str(script_path)],
+            cwd=str(workspace.root),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            preexec_fn=preexec,
+            check=False,
+        )
+        killed_reason = None
+        # Heuristic: SIGKILL (-9) on Linux when RLIMIT_AS fires.
+        if completed.returncode == -9:
+            killed_reason = "memory"
+        return SubprocessResult(
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            killed_reason=killed_reason,
+            script_path=script_path,
+        )
+    except _subprocess.TimeoutExpired as e:
+        stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+        return SubprocessResult(
+            returncode=-1,
+            stdout=stdout,
+            stderr=stderr,
+            killed_reason="timeout",
+            script_path=script_path,
+        )
