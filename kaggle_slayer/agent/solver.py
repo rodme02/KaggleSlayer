@@ -166,7 +166,9 @@ class Solver:
             self.journal.log_tool_call(
                 tool=name,
                 args=args,
-                result_summary=text_result[:200],
+                # 8 KB matches the LLM-visible cap, so resume can replay
+                # exactly what the LLM originally saw.
+                result_summary=text_result[:8000],
             )
             return _cap_tool_result(text_result)
         except ToolError as e:

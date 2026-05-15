@@ -335,3 +335,39 @@ def test_solver_cost_budget_checkpoint(tmp_path):
     result = solver.solve()
     # Denied at first cost-budget check → exit with cost_budget_exceeded.
     assert result.status == "cost_budget_exceeded"
+
+
+def test_solver_journals_full_capped_tool_result_for_resume_fidelity(tmp_path):
+    """The run_log result_summary must store up to ~8KB so resume can
+    reconstruct what the LLM actually saw on the original turn."""
+    ws = _make_workspace_and_ctx(tmp_path)
+
+    big_text = "x" * 4096  # 4 KB — well above the old 200-char cap, below the new 8 KB cap
+    # Custom registry with a single handler that returns big_text
+    from kaggle_slayer.agent.tools import Tool, ToolRegistry
+    reg = ToolRegistry()
+    reg.register(Tool(
+        name="echo",
+        description="returns the supplied content",
+        schema={"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]},
+        handler=lambda ctx, content: content,
+    ))
+    reg.register(Tool(
+        name="done",
+        description="signal finished",
+        schema={"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+        handler=lambda ctx, summary: (setattr(ctx, "finished", True), setattr(ctx, "final_summary", summary))[0],
+    ))
+
+    client = _CannedClient(responses=[
+        Response(text="", tool_calls=[ToolCall(id="t1", name="echo", args={"content": big_text})], usage=Usage(0, 0, 0)),
+        Response(text="", tool_calls=[ToolCall(id="t2", name="done", args={"summary": "done"})], usage=Usage(0, 0, 0)),
+    ])
+    solver = Solver(workspace=ws, llm_client=client, max_iterations=5, registry=reg)
+    solver.solve()
+
+    import json
+    records = [json.loads(line) for line in ws.run_log_path.read_text().splitlines()]
+    echo_record = next(r for r in records if r.get("tool") == "echo")
+    # Must contain the full 4 KB (or close to it), not be truncated at 200 chars.
+    assert len(echo_record["result_summary"]) >= 4000
