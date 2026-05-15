@@ -47,6 +47,8 @@ class SolverContext:
     final_summary: str = ""
     checkpoint_handler: Any | None = None  # CheckpointHandler; Any to avoid harness import cycle
     best_cv_mean: float | None = None
+    kaggle_client: Any | None = None
+    competition: str = ""
 
 
 @dataclass

@@ -120,6 +120,10 @@ def train_cv(ctx: Any) -> str:
         f"mean={result.mean:.4f}, std={result.std:.4f}, fold_scores={[round(s, 4) for s in result.fold_scores]}, "
         f"duration_s={result.duration_s:.2f}"
     )
+    # Track best CV for the regression-aware submit_kaggle gate (spec §9).
+    prior = getattr(ctx, "best_cv_mean", None)
+    if prior is None or result.mean > prior:
+        ctx.best_cv_mean = float(result.mean)
     return summary
 
 
@@ -253,3 +257,93 @@ def set_metric(ctx: Any, *, name: str) -> str:
     previous = ctx.metric_name
     ctx.metric_name = name
     return f"metric changed to {name!r} (was {previous!r}, approved by checkpoint)"
+
+
+def submit_kaggle(ctx: Any, *, csv_path: str, message: str) -> str:
+    """Push a submission CSV to Kaggle. Checkpoint-gated by spec §9.
+
+    Trigger classification:
+      - First submission in this workspace → SUBMIT_KAGGLE_FIRST (always blocks)
+      - Subsequent, CV regressed vs best → SUBMIT_KAGGLE_REGRESSION (blocks)
+      - Subsequent, CV did not regress → SUBMIT_KAGGLE_NON_REGRESSION (auto_safe approves)
+
+    On success this handler appends a tool_call record to run_log.jsonl that
+    embeds `cv_at_submit`. The Solver also journals the call separately —
+    the duplicate is acceptable because future regression detection (and
+    resume) keys off `cv_at_submit`, which only this site can attach.
+    """
+    workspace = ctx.workspace
+    handler = getattr(ctx, "checkpoint_handler", None)
+    kaggle = getattr(ctx, "kaggle_client", None)
+    if handler is None:
+        raise ToolError("submit_kaggle is gated but no checkpoint handler is configured")
+    if kaggle is None:
+        raise ToolError("submit_kaggle requires a kaggle_client on the context")
+
+    from kaggle_slayer.agent.handlers.files import _resolve_under  # noqa: PLC0415
+    from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
+
+    target_csv = _resolve_under(workspace.root, csv_path)
+    if not target_csv.exists():
+        raise ToolError(f"submission CSV not found: {csv_path}")
+
+    trigger, prev_cv = _classify_submit_trigger(ctx)
+    decision = handler.request(cp.CheckpointRequest(
+        trigger=trigger,
+        action=f"submit '{target_csv.name}' to kaggle competition {ctx.competition}",
+        evidence={
+            "csv_path": csv_path,
+            "message": message,
+            "cv_mean": ctx.best_cv_mean,
+            "prev_best_cv": prev_cv,
+            "kind": trigger.value,
+        },
+    ))
+    if decision in (cp.Decision.DENY, cp.Decision.ABORT):
+        raise ToolError(f"checkpoint denied submit_kaggle ({decision.value})")
+
+    kaggle.submit(ctx.competition, csv_path=target_csv, message=message)
+    # Re-journal with cv_at_submit so future regression checks can compare.
+    ctx.journal._append(  # noqa: SLF001
+        ctx.workspace.run_log_path,
+        {
+            "ts": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+            "kind": "tool_call",
+            "tool": "submit_kaggle",
+            "args": {"csv_path": csv_path, "message": message},
+            "result_summary": f"submitted to {ctx.competition}",
+            "cv_at_submit": ctx.best_cv_mean,
+        },
+    )
+    return f"submitted '{target_csv.name}' to {ctx.competition!r} (msg={message!r})"
+
+
+def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
+    """Inspect the journal: was this the first submit, regression, or improvement?
+
+    Returns (CheckpointTrigger, prev_best_cv_seen_at_a_prior_submit).
+    The `Any` return type avoids importing the checkpoints module at
+    module-load time (lazy import inside the function body).
+    """
+    from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
+
+    saw_prior_submit = False
+    prev_cvs: list[float] = []
+    for rec in ctx.journal.iter_records():
+        if rec.get("tool") == "submit_kaggle" and rec.get("kind") == "tool_call":
+            saw_prior_submit = True
+            cv = rec.get("cv_at_submit")
+            if isinstance(cv, (int, float)):
+                prev_cvs.append(float(cv))
+    if not saw_prior_submit:
+        return cp.CheckpointTrigger.SUBMIT_KAGGLE_FIRST, None
+    if not prev_cvs:
+        # Prior submit existed but had no recorded CV (legacy / hand-seeded
+        # record). Treat as non-regression — the agent passed the FIRST gate
+        # once already; we have no evidence the new attempt is worse.
+        return cp.CheckpointTrigger.SUBMIT_KAGGLE_NON_REGRESSION, None
+    prev_best = max(prev_cvs)
+    current = ctx.best_cv_mean if ctx.best_cv_mean is not None else float("-inf")
+    if current < prev_best:
+        return cp.CheckpointTrigger.SUBMIT_KAGGLE_REGRESSION, prev_best
+    return cp.CheckpointTrigger.SUBMIT_KAGGLE_NON_REGRESSION, prev_best
