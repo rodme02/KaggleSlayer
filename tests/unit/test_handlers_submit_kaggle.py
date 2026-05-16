@@ -184,6 +184,48 @@ def test_submit_kaggle_leaderboard_record_not_written_on_denial(tmp_path):
     assert _read_leaderboard(ctx.workspace) == []
 
 
+def test_submit_kaggle_regression_for_rmse_metric(tmp_path):
+    """F14: with rmse (lower is better), a HIGHER current CV vs prior best is
+    a regression. The previous classifier inverted this and would auto-approve
+    a worse-logloss/RMSE/MAE model under AUTO_SAFE — silently shipping rubbish.
+    """
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    ctx.metric_name = "rmse"
+    _seed_leaderboard(ctx.workspace, cv_at_submit=0.5)  # prior best (lower=better)
+    ctx.best_cv_mean = 0.7  # current model is WORSE (higher RMSE)
+    (ctx.workspace.submissions_dir / "v2.csv").write_text("id,target\n1,0\n")
+    ml_h.submit_kaggle(ctx, csv_path="submissions/v2.csv", message="v2")
+    lines = ctx.workspace.run_log_path.read_text().splitlines()
+    cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
+    assert cp_records[-1]["trigger"] == "submit_kaggle_regression"
+
+
+def test_submit_kaggle_non_regression_for_rmse_metric(tmp_path):
+    """F14: with rmse, a LOWER current CV vs prior best is an improvement."""
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    ctx.metric_name = "rmse"
+    _seed_leaderboard(ctx.workspace, cv_at_submit=0.7)  # prior best
+    ctx.best_cv_mean = 0.5  # current model is BETTER (lower RMSE)
+    (ctx.workspace.submissions_dir / "v2.csv").write_text("id,target\n1,0\n")
+    ml_h.submit_kaggle(ctx, csv_path="submissions/v2.csv", message="v2")
+    lines = ctx.workspace.run_log_path.read_text().splitlines()
+    cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
+    assert cp_records[-1]["trigger"] == "submit_kaggle_non_regression"
+
+
+def test_submit_kaggle_regression_for_logloss_metric(tmp_path):
+    """F14: with logloss (lower is better), a higher score is a regression."""
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    ctx.metric_name = "logloss"
+    _seed_leaderboard(ctx.workspace, cv_at_submit=0.30)
+    ctx.best_cv_mean = 0.45  # worse logloss
+    (ctx.workspace.submissions_dir / "v2.csv").write_text("id,target\n1,0\n")
+    ml_h.submit_kaggle(ctx, csv_path="submissions/v2.csv", message="v2")
+    lines = ctx.workspace.run_log_path.read_text().splitlines()
+    cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
+    assert cp_records[-1]["trigger"] == "submit_kaggle_regression"
+
+
 def test_classify_submit_trigger_tolerates_partial_trailing_line(tmp_path):
     """A crashed mid-write leaderboard.jsonl must not break classification."""
     ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)

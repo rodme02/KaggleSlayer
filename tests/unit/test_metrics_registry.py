@@ -92,3 +92,24 @@ def test_r2_one_when_perfect():
     y_pred = np.array([1.0, 2.0, 3.0, 4.0])
     assert m.score(y_true, y_pred) == 1.0
     assert m.higher_is_better is True
+
+
+def test_higher_is_better_pinned_for_every_week1_metric():
+    """F14: regression detection in submit_kaggle keys off this field. A
+    silent flip (e.g., from True to False for rmse) would let a worse model
+    auto-submit under AUTO_SAFE. Pin every value so a future edit must
+    update this test on purpose.
+    """
+    expected = {
+        "accuracy": True,
+        "auc": True,
+        "r2": True,
+        "rmse": False,
+        "mae": False,
+        "logloss": False,
+    }
+    for name, want in expected.items():
+        assert metrics.get(name).higher_is_better is want, (
+            f"metric {name!r}: higher_is_better expected {want}, "
+            f"got {metrics.get(name).higher_is_better}"
+        )

@@ -371,6 +371,12 @@ def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
     Returns (CheckpointTrigger, prev_best_cv_seen_at_a_prior_submit).
     The `Any` return type avoids importing the checkpoints module at
     module-load time (lazy import inside the function body).
+
+    F14: direction depends on the active metric. For higher-is-better metrics
+    (accuracy/auc/r2), "regression" means current < prev_best. For lower-is-
+    better metrics (rmse/mae/logloss), it means current > prev_best. The old
+    code hard-coded `<`, which would auto-approve a WORSE rmse/logloss model
+    under AUTO_SAFE.
     """
     from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
 
@@ -387,9 +393,24 @@ def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
         # — the agent passed the FIRST gate once already; we have no evidence
         # the new attempt is worse.
         return cp.CheckpointTrigger.SUBMIT_KAGGLE_NON_REGRESSION, None
-    prev_best = max(prev_cvs)
-    current = ctx.best_cv_mean if ctx.best_cv_mean is not None else float("-inf")
-    if current < prev_best:
+
+    # Resolve direction from the metric registry. Unknown metric → treat as
+    # higher-is-better (safer: blocks more, costs only an extra approval).
+    try:
+        higher_is_better = metrics.get(ctx.metric_name).higher_is_better
+    except KeyError:
+        higher_is_better = True
+
+    if higher_is_better:
+        prev_best = max(prev_cvs)
+        current = ctx.best_cv_mean if ctx.best_cv_mean is not None else float("-inf")
+        regressed = current < prev_best
+    else:
+        prev_best = min(prev_cvs)
+        current = ctx.best_cv_mean if ctx.best_cv_mean is not None else float("inf")
+        regressed = current > prev_best
+
+    if regressed:
         return cp.CheckpointTrigger.SUBMIT_KAGGLE_REGRESSION, prev_best
     return cp.CheckpointTrigger.SUBMIT_KAGGLE_NON_REGRESSION, prev_best
 
