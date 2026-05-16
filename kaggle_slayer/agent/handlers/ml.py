@@ -12,6 +12,8 @@ agent (and the future dashboard) a paper trail of every attempt.
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -267,10 +269,15 @@ def submit_kaggle(ctx: Any, *, csv_path: str, message: str) -> str:
       - Subsequent, CV regressed vs best → SUBMIT_KAGGLE_REGRESSION (blocks)
       - Subsequent, CV did not regress → SUBMIT_KAGGLE_NON_REGRESSION (auto_safe approves)
 
-    On success this handler appends a tool_call record to run_log.jsonl that
-    embeds `cv_at_submit`. The Solver also journals the call separately —
-    the duplicate is acceptable because future regression detection (and
-    resume) keys off `cv_at_submit`, which only this site can attach.
+    On success this handler writes ONE record to `submissions/leaderboard.jsonl`
+    (spec §10). The Solver's `_dispatch` journals the tool_call to
+    `run_log.jsonl` separately — this handler does NOT duplicate that write,
+    so each successful submit yields exactly one tool_call record.
+
+    The leaderboard.jsonl record carries `cv_at_submit` so future regression
+    checks have what they need; later weeks may append a real `lb_score` to
+    the same record (or via a separate post-submit run) once Kaggle returns
+    a score.
     """
     workspace = ctx.workspace
     handler = getattr(ctx, "checkpoint_handler", None)
@@ -303,23 +310,63 @@ def submit_kaggle(ctx: Any, *, csv_path: str, message: str) -> str:
         raise ToolError(f"checkpoint denied submit_kaggle ({decision.value})")
 
     kaggle.submit(ctx.competition, csv_path=target_csv, message=message)
-    # Re-journal with cv_at_submit so future regression checks can compare.
-    ctx.journal._append(  # noqa: SLF001
-        ctx.workspace.run_log_path,
-        {
-            "ts": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
-            "kind": "tool_call",
-            "tool": "submit_kaggle",
-            "args": {"csv_path": csv_path, "message": message},
-            "result_summary": f"submitted to {ctx.competition}",
-            "cv_at_submit": ctx.best_cv_mean,
-        },
+    # Append the post-submit leaderboard record (spec §10). The Solver's
+    # _dispatch handles the run_log.jsonl tool_call entry; we deliberately
+    # do NOT write a second one here.
+    _append_leaderboard_record(
+        workspace.submissions_dir / "leaderboard.jsonl",
+        csv=target_csv.name,
+        cv_at_submit=ctx.best_cv_mean,
+        message=message,
+        competition=ctx.competition,
     )
     return f"submitted '{target_csv.name}' to {ctx.competition!r} (msg={message!r})"
 
 
+def _append_leaderboard_record(
+    path: Path,
+    *,
+    csv: str,
+    cv_at_submit: float | None,
+    message: str,
+    competition: str,
+) -> None:
+    """Append a single JSON line to submissions/leaderboard.jsonl, fsync-safe."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rec: dict[str, Any] = {
+        "ts": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
+        "csv": csv,
+        "cv_at_submit": cv_at_submit,
+        "message": message,
+        "competition": competition,
+    }
+    with path.open("a") as f:
+        f.write(json.dumps(rec) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _iter_leaderboard(workspace: Any) -> list[dict[str, Any]]:
+    """Yield records from submissions/leaderboard.jsonl, tolerating a partial
+    trailing line (mirrors `Journal.iter_records`)."""
+    path = workspace.submissions_dir / "leaderboard.jsonl"
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            # Partial trailing write from a crash; skip it.
+            continue
+    return records
+
+
 def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
-    """Inspect the journal: was this the first submit, regression, or improvement?
+    """Inspect submissions/leaderboard.jsonl: first submit, regression, or improvement?
 
     Returns (CheckpointTrigger, prev_best_cv_seen_at_a_prior_submit).
     The `Any` return type avoids importing the checkpoints module at
@@ -327,20 +374,18 @@ def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
     """
     from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
 
-    saw_prior_submit = False
-    prev_cvs: list[float] = []
-    for rec in ctx.journal.iter_records():
-        if rec.get("tool") == "submit_kaggle" and rec.get("kind") == "tool_call":
-            saw_prior_submit = True
-            cv = rec.get("cv_at_submit")
-            if isinstance(cv, (int, float)):
-                prev_cvs.append(float(cv))
-    if not saw_prior_submit:
+    records = _iter_leaderboard(ctx.workspace)
+    if not records:
         return cp.CheckpointTrigger.SUBMIT_KAGGLE_FIRST, None
+    prev_cvs: list[float] = []
+    for rec in records:
+        cv = rec.get("cv_at_submit")
+        if isinstance(cv, (int, float)):
+            prev_cvs.append(float(cv))
     if not prev_cvs:
-        # Prior submit existed but had no recorded CV (legacy / hand-seeded
-        # record). Treat as non-regression — the agent passed the FIRST gate
-        # once already; we have no evidence the new attempt is worse.
+        # Prior submit existed but had no recorded CV. Treat as non-regression
+        # — the agent passed the FIRST gate once already; we have no evidence
+        # the new attempt is worse.
         return cp.CheckpointTrigger.SUBMIT_KAGGLE_NON_REGRESSION, None
     prev_best = max(prev_cvs)
     current = ctx.best_cv_mean if ctx.best_cv_mean is not None else float("-inf")

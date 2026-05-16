@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
@@ -46,13 +47,34 @@ def _make_ctx(tmp_path, *, stub_decision=cp.Decision.APPROVE):
     )
 
 
+def _seed_leaderboard(ws: Workspace, *, cv_at_submit: float | None, message: str = "prior") -> None:
+    """Append a leaderboard.jsonl record to simulate a prior successful submit."""
+    lb_path = ws.submissions_dir / "leaderboard.jsonl"
+    lb_path.parent.mkdir(parents=True, exist_ok=True)
+    rec = {
+        "ts": "2026-05-15T00:00:00+00:00",
+        "csv": "prior.csv",
+        "cv_at_submit": cv_at_submit,
+        "message": message,
+        "competition": ws.name,
+    }
+    with lb_path.open("a") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
+def _read_leaderboard(ws: Workspace) -> list[dict]:
+    lb_path = ws.submissions_dir / "leaderboard.jsonl"
+    if not lb_path.exists():
+        return []
+    return [json.loads(line) for line in lb_path.read_text().splitlines() if line.strip()]
+
+
 def test_submit_kaggle_first_submission_gated_as_first(tmp_path):
     ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
     result = ml_h.submit_kaggle(ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="baseline")
     # Approved → kaggle.submit must have been called once
     ctx.kaggle_client.submit.assert_called_once()
     # And the trigger journalled was SUBMIT_KAGGLE_FIRST
-    import json
     lines = ctx.workspace.run_log_path.read_text().splitlines()
     cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
     assert cp_records[0]["trigger"] == "submit_kaggle_first"
@@ -67,20 +89,16 @@ def test_submit_kaggle_denied_does_not_submit(tmp_path):
 
 
 def test_submit_kaggle_subsequent_non_regression(tmp_path):
-    """Second submission with same-or-better CV is gated as SUBMIT_KAGGLE_NON_REGRESSION."""
+    """Second submission with same-or-better CV is gated as SUBMIT_KAGGLE_NON_REGRESSION.
+
+    Prior submits are tracked in submissions/leaderboard.jsonl (spec §10).
+    """
     ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
-    # Simulate a successful first submission already journalled
-    ctx.journal._append(  # noqa: SLF001
-        ctx.workspace.run_log_path,
-        {"ts": "2026-05-15", "kind": "tool_call", "tool": "submit_kaggle",
-         "args": {"csv_path": "..", "message": "v1"}, "result_summary": "submitted"},
-    )
+    # Simulate a successful first submission via leaderboard.jsonl (no CV recorded).
+    _seed_leaderboard(ctx.workspace, cv_at_submit=None, message="v1")
     ctx.best_cv_mean = 0.80
-    # Pretend a v2 CSV exists; the test sets best_cv_mean to a higher value (improved)
     (ctx.workspace.submissions_dir / "v2.csv").write_text("id,target\n1,0\n")
-    # The new CV that the LLM just ran is implicitly stored as best_cv_mean already.
     ml_h.submit_kaggle(ctx, csv_path="submissions/v2.csv", message="v2")
-    import json
     lines = ctx.workspace.run_log_path.read_text().splitlines()
     cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
     # Most recent checkpoint must be a non-regression trigger
@@ -90,16 +108,10 @@ def test_submit_kaggle_subsequent_non_regression(tmp_path):
 def test_submit_kaggle_subsequent_regression(tmp_path):
     """Second submission with worse CV than best is gated as SUBMIT_KAGGLE_REGRESSION."""
     ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
-    ctx.journal._append(  # noqa: SLF001
-        ctx.workspace.run_log_path,
-        {"ts": "2026-05-15", "kind": "tool_call", "tool": "submit_kaggle",
-         "args": {"csv_path": "..", "message": "v1"}, "result_summary": "submitted",
-         "cv_at_submit": 0.85},  # we track the CV at each submission
-    )
+    _seed_leaderboard(ctx.workspace, cv_at_submit=0.85, message="v1")
     ctx.best_cv_mean = 0.80  # current model is WORSE than 0.85 at the previous submit
     (ctx.workspace.submissions_dir / "v2.csv").write_text("id,target\n1,0\n")
     ml_h.submit_kaggle(ctx, csv_path="submissions/v2.csv", message="v2")
-    import json
     lines = ctx.workspace.run_log_path.read_text().splitlines()
     cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
     assert cp_records[-1]["trigger"] == "submit_kaggle_regression"
@@ -115,3 +127,75 @@ def test_submit_kaggle_rejects_path_traversal(tmp_path):
     ctx = _make_ctx(tmp_path)
     with pytest.raises(ToolError, match="outside"):
         ml_h.submit_kaggle(ctx, csv_path="../escape.csv", message="x")
+
+
+def test_submit_kaggle_writes_single_run_log_record(tmp_path):
+    """F1/F3: exactly one tool_call record per successful submit.
+
+    Previously the handler wrote one record AND the Solver's _dispatch wrote a
+    second one, producing two duplicate entries that ballooned the rebuilt
+    conversation to 4 messages per submit. The handler must now write zero
+    run_log records itself; the Solver's _dispatch handles journalling.
+    """
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    # Simulate the Solver's _dispatch journalling by calling log_tool_call
+    # exactly once around the handler invocation. The handler itself must add
+    # zero extra tool_call records to run_log.jsonl.
+    result = ml_h.submit_kaggle(
+        ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="baseline"
+    )
+    ctx.journal.log_tool_call(
+        tool="submit_kaggle",
+        args={"csv_path": "submissions/2026-05-15_001_lr.csv", "message": "baseline"},
+        result_summary=result,
+    )
+    lines = ctx.workspace.run_log_path.read_text().splitlines()
+    records = [json.loads(line) for line in lines]
+    submit_calls = [r for r in records if r.get("tool") == "submit_kaggle" and r.get("kind") == "tool_call"]
+    assert len(submit_calls) == 1, (
+        f"expected exactly one submit_kaggle tool_call record, found {len(submit_calls)}"
+    )
+
+
+def test_submit_kaggle_appends_leaderboard_record(tmp_path):
+    """F1: successful submit must append a single record to submissions/leaderboard.jsonl."""
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    ctx.best_cv_mean = 0.72
+    ml_h.submit_kaggle(
+        ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="baseline"
+    )
+    records = _read_leaderboard(ctx.workspace)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["csv"] == "2026-05-15_001_lr.csv"
+    assert rec["message"] == "baseline"
+    assert rec["competition"] == "test-comp"
+    assert rec["cv_at_submit"] == pytest.approx(0.72)
+    assert "ts" in rec
+
+
+def test_submit_kaggle_leaderboard_record_not_written_on_denial(tmp_path):
+    """Denied submits must NOT pollute leaderboard.jsonl."""
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.DENY)
+    with pytest.raises(ToolError, match="denied"):
+        ml_h.submit_kaggle(
+            ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="baseline"
+        )
+    assert _read_leaderboard(ctx.workspace) == []
+
+
+def test_classify_submit_trigger_tolerates_partial_trailing_line(tmp_path):
+    """A crashed mid-write leaderboard.jsonl must not break classification."""
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    _seed_leaderboard(ctx.workspace, cv_at_submit=0.70)
+    # Append a partial JSON line, as if a crash interrupted a write.
+    lb_path = ctx.workspace.submissions_dir / "leaderboard.jsonl"
+    with lb_path.open("a") as f:
+        f.write('{"ts": "2026-05-16", "csv": "partial.cs')  # no newline, no closing brace
+    ctx.best_cv_mean = 0.80
+    (ctx.workspace.submissions_dir / "v2.csv").write_text("id,target\n1,0\n")
+    # Should not raise — partial trailing line is silently skipped.
+    ml_h.submit_kaggle(ctx, csv_path="submissions/v2.csv", message="v2")
+    lines = ctx.workspace.run_log_path.read_text().splitlines()
+    cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
+    assert cp_records[-1]["trigger"] == "submit_kaggle_non_regression"
