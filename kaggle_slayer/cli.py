@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.panel import Panel
 
 from kaggle_slayer.agent.cost_ledger import CostLedger
 from kaggle_slayer.agent.llm_client import GeminiClient
@@ -62,12 +64,39 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                    help="USD cost cap; checkpoint fires when exceeded")
     p.add_argument("--auto-approve", choices=["off", "safe", "all"], default="off",
                    help="Checkpoint mode: off=interactive, safe=auto-approve non-regression submits only, all=auto-approve everything (tests only)")
-    return p.parse_args(argv)
+    p.add_argument("--i-know-what-im-doing", action="store_true",
+                   help="Required acknowledgement when using --auto-approve all (bypasses every checkpoint gate)")
+    args = p.parse_args(argv)
+
+    # F5: --auto-approve all bypasses *every* checkpoint, including the Kaggle
+    # daily-submit cap, cost-budget overrun, and metric overrides. Require an
+    # explicit second flag so a copied command line cannot silently disarm
+    # those gates.
+    if args.auto_approve == "all" and not args.i_know_what_im_doing:
+        print(
+            "ERROR: --auto-approve all disables the Kaggle daily-submit cap, "
+            "cost budget, and metric overrides. Pass --i-know-what-im-doing "
+            "to acknowledge.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    return args
 
 
 def run(argv: list[str]) -> int:
     args = _parse_args(argv)
     load_dotenv()
+
+    # F5: surface the safety bypass at run start so it's visible in logs/CI.
+    if args.auto_approve == "all":
+        Console(stderr=True).print(Panel(
+            "WARNING: --auto-approve all is ENABLED. Kaggle daily submit cap, "
+            "cost budget, and metric overrides will NOT prompt. Use this only "
+            "in scripted tests.",
+            title="safety gate off",
+            style="yellow",
+        ))
 
     comp_path = Path(args.workspace_path)
     workspace = Workspace.create(root=comp_path)

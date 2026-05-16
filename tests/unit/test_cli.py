@@ -126,6 +126,31 @@ def test_cli_parses_auto_approve_flag(tmp_path):
     assert args.auto_approve == "safe"
 
 
+def test_cli_auto_approve_all_requires_i_know_what_im_doing(tmp_path):
+    """F5: --auto-approve all without --i-know-what-im-doing must exit 2.
+
+    The 'all' mode auto-approves every checkpoint trigger — including the
+    Kaggle daily-submit cap, cost-budget overrun, and metric overrides.
+    Forcing a second flag prevents a copy-pasted command line from
+    silently bypassing those gates.
+    """
+    with pytest.raises(SystemExit) as ex:
+        cli._parse_args([str(tmp_path / "comp"), "--target", "y", "--auto-approve", "all"])
+    assert ex.value.code == 2
+
+
+def test_cli_auto_approve_all_with_acknowledgement_parses(tmp_path):
+    """F5: --auto-approve all + --i-know-what-im-doing parses successfully."""
+    args = cli._parse_args([
+        str(tmp_path / "comp"),
+        "--target", "y",
+        "--auto-approve", "all",
+        "--i-know-what-im-doing",
+    ])
+    assert args.auto_approve == "all"
+    assert args.i_know_what_im_doing is True
+
+
 def test_cli_resume_passes_rebuilt_history_to_solver(tmp_path):
     """When --resume is set and run_log.jsonl has prior tool calls, those
     messages are passed via solve(resume_from=...)."""
