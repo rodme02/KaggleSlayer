@@ -395,7 +395,23 @@ def _classify_submit_trigger(ctx: Any) -> tuple[Any, float | None]:
 
 
 def request_human_approval(ctx: Any, *, action: str, evidence_json: str = "{}") -> str:
-    """Agent-initiated checkpoint: pause and ask the human to weigh in."""
+    """Agent-initiated checkpoint: pause and ask the human to weigh in.
+
+    Unlike `set_metric` and `submit_kaggle` (which RAISE ToolError on DENY or
+    ABORT), this handler returns the decision as a string for every outcome.
+    The agent initiated the request, so the agent — not the harness — decides
+    what to do with the answer. The harness will NOT unilaterally block the
+    next action the agent takes after this returns.
+
+    Returns one of:
+      - "decision=approve"
+      - "decision=deny"
+      - "decision=abort"
+      - "decision=skip_check"
+
+    If the response is "deny" or "abort", the agent MUST NOT proceed with
+    whatever it was about to do. The system prompt reinforces this rule.
+    """
     handler = getattr(ctx, "checkpoint_handler", None)
     if handler is None:
         raise ToolError("request_human_approval needs a checkpoint handler on the context")

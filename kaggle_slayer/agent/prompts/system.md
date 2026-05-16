@@ -21,7 +21,7 @@ that scores at or above the public-leaderboard median.
 - `run_python(code, timeout_s, memory_mb)` — sandboxed Python (plotting, peeks, debug). NOT for CV.
 - `set_metric(name)` — change the scoring metric. Always asks the human first.
 - `submit_kaggle(csv_path, message)` — push a submission CSV to Kaggle. Always asks the human on the first submission, and on any score regression.
-- `request_human_approval(action, evidence_json)` — pause and ask the human when you're uncertain.
+- `request_human_approval(action, evidence_json)` — pause and ask the human when you're uncertain. Returns `"decision=approve"`, `"decision=deny"`, `"decision=abort"`, or `"decision=skip_check"`. Unlike `set_metric`/`submit_kaggle`, this tool always returns — even on deny/abort — because YOU asked. If you get `"decision=deny"` or `"decision=abort"`, DO NOT proceed with the action you asked about.
 
 ## Contracts your code must honor
 
