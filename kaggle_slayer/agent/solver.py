@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kaggle_slayer.agent.handlers import make_builtin_registry
 from kaggle_slayer.agent.llm_client import LLMClient, Message
@@ -23,6 +23,15 @@ from kaggle_slayer.agent.prompts import load_system_prompt
 from kaggle_slayer.agent.tools import ToolError, ToolRegistry
 from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.workspace import Workspace
+
+if TYPE_CHECKING:
+    # F11: these are real types — no actual circular import exists, but we
+    # keep them under TYPE_CHECKING so the module's import-time graph stays
+    # minimal. `from __future__ import annotations` (above) makes all
+    # annotations lazy strings, so dataclass field types resolve fine.
+    from kaggle_slayer.agent.cost_ledger import CostLedger
+    from kaggle_slayer.harness.checkpoints import CheckpointHandler
+    from kaggle_slayer.harness.kaggle_client import KaggleClient
 
 # Cap on the text we feed back to the LLM per tool result. A 20KB raw output
 # (e.g., a long DataFrame.to_string()) would burn tokens and crowd context.
@@ -45,9 +54,9 @@ class SolverContext:
     cv_params: dict[str, Any] = field(default_factory=dict)
     finished: bool = False
     final_summary: str = ""
-    checkpoint_handler: Any | None = None  # CheckpointHandler; Any to avoid harness import cycle
+    checkpoint_handler: CheckpointHandler | None = None
     best_cv_mean: float | None = None
-    kaggle_client: Any | None = None
+    kaggle_client: KaggleClient | None = None
     competition: str = ""
 
 
@@ -72,10 +81,10 @@ class Solver:
         max_iterations: int = 25,
         time_budget_s: float = 900.0,
         registry: ToolRegistry | None = None,
-        checkpoint_handler: Any | None = None,
-        cost_ledger: Any | None = None,
+        checkpoint_handler: CheckpointHandler | None = None,
+        cost_ledger: CostLedger | None = None,
         cost_budget_usd: float | None = None,
-        kaggle_client: Any | None = None,
+        kaggle_client: KaggleClient | None = None,
     ) -> None:
         self.workspace = workspace
         self.llm = llm_client
