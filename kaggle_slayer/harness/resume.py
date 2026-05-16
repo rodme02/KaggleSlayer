@@ -103,7 +103,11 @@ def rebuild_conversation(workspace: Workspace) -> list[Message]:
             tool_name = rec.get("tool", "unknown")
             args = rec.get("args", {})
             result = rec.get("result_summary", "")
-            tc = ToolCall(id=f"resume_{len(messages)}", name=tool_name, args=args)
+            # F8: prefer the original LLM-issued id when the journal stored
+            # one; fall back to the synthetic resume_<n> for back-compat with
+            # journals written before tool_call_id was journalled.
+            tc_id = rec.get("tool_call_id") or f"resume_{len(messages)}"
+            tc = ToolCall(id=tc_id, name=tool_name, args=args)
             messages.append(Message(role="model", content="", tool_calls=[tc]))
             payload = json.dumps({"tool": tool_name, "result": result})
             messages.append(Message(role="tool", content=payload))
@@ -111,7 +115,8 @@ def rebuild_conversation(workspace: Workspace) -> list[Message]:
             tool_name = rec.get("tool", "unknown")
             args = rec.get("args", {})
             error = rec.get("error", "")
-            tc = ToolCall(id=f"resume_{len(messages)}", name=tool_name, args=args)
+            tc_id = rec.get("tool_call_id") or f"resume_{len(messages)}"
+            tc = ToolCall(id=tc_id, name=tool_name, args=args)
             messages.append(Message(role="model", content="", tool_calls=[tc]))
             payload = json.dumps({"tool": tool_name, "result": error})
             messages.append(Message(role="tool", content=payload))

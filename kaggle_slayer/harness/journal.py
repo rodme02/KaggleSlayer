@@ -47,17 +47,21 @@ class Journal:
         tool: str,
         args: dict[str, Any],
         result_summary: str,
+        tool_call_id: str | None = None,
     ) -> None:
-        self._append(
-            self.workspace.run_log_path,
-            {
-                "ts": _now_iso(),
-                "kind": "tool_call",
-                "tool": tool,
-                "args": self._summarize_args(args),
-                "result_summary": result_summary,
-            },
-        )
+        record: dict[str, Any] = {
+            "ts": _now_iso(),
+            "kind": "tool_call",
+            "tool": tool,
+            "args": self._summarize_args(args),
+            "result_summary": result_summary,
+        }
+        if tool_call_id is not None:
+            # F8: preserve the LLM-issued id so resume can replay function_call
+            # / function_response pairs against stricter providers that won't
+            # accept fabricated ids.
+            record["tool_call_id"] = tool_call_id
+        self._append(self.workspace.run_log_path, record)
 
     def log_tool_error(
         self,
@@ -65,17 +69,18 @@ class Journal:
         tool: str,
         args: dict[str, Any],
         error: str,
+        tool_call_id: str | None = None,
     ) -> None:
-        self._append(
-            self.workspace.run_log_path,
-            {
-                "ts": _now_iso(),
-                "kind": "tool_error",
-                "tool": tool,
-                "args": self._summarize_args(args),
-                "error": error,
-            },
-        )
+        record: dict[str, Any] = {
+            "ts": _now_iso(),
+            "kind": "tool_error",
+            "tool": tool,
+            "args": self._summarize_args(args),
+            "error": error,
+        }
+        if tool_call_id is not None:
+            record["tool_call_id"] = tool_call_id
+        self._append(self.workspace.run_log_path, record)
 
     @staticmethod
     def _summarize_args(args: dict[str, Any]) -> dict[str, Any]:

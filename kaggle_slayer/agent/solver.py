@@ -159,7 +159,7 @@ class Solver:
             ))
 
             for tc in response.tool_calls:
-                tool_result_text = self._dispatch(tc.name, tc.args)
+                tool_result_text = self._dispatch(tc.name, tc.args, tool_call_id=tc.id)
                 # Feed the result back as a tool-role message. We serialize as a
                 # small JSON payload so the LLMClient knows which tool the
                 # function_response Part should attribute to.
@@ -175,7 +175,7 @@ class Solver:
 
         return SolveResult(status="max_iterations", iterations=self.max_iterations, summary="")
 
-    def _dispatch(self, name: str, args: dict[str, Any]) -> str:
+    def _dispatch(self, name: str, args: dict[str, Any], *, tool_call_id: str | None = None) -> str:
         """Invoke a tool, journal it, return a string result (success or error)."""
         try:
             result = self.registry.invoke(name, ctx=self.ctx, args=args)
@@ -186,15 +186,16 @@ class Solver:
                 # 8 KB matches the LLM-visible cap, so resume can replay
                 # exactly what the LLM originally saw.
                 result_summary=text_result[:8000],
+                tool_call_id=tool_call_id,
             )
             return _cap_tool_result(text_result)
         except ToolError as e:
             err_msg = f"ToolError: {e}"
-            self.journal.log_tool_error(tool=name, args=args, error=err_msg)
+            self.journal.log_tool_error(tool=name, args=args, error=err_msg, tool_call_id=tool_call_id)
             return err_msg
         except Exception as e:  # noqa: BLE001
             err_msg = f"unexpected error in {name}: {e!r}"
-            self.journal.log_tool_error(tool=name, args=args, error=err_msg)
+            self.journal.log_tool_error(tool=name, args=args, error=err_msg, tool_call_id=tool_call_id)
             return err_msg
 
     def _gate_wall_clock(self, iterations_so_far: int) -> bool:

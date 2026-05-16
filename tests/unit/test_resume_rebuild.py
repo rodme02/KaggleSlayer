@@ -80,3 +80,29 @@ def test_rebuild_handles_missing_log_file(ws):
     # Don't write anything; run_log_path doesn't exist
     assert not ws.run_log_path.exists()
     assert resume.rebuild_conversation(ws) == []
+
+
+def test_rebuild_preserves_original_tool_call_id(ws):
+    """F8: when the journal record stores a tool_call_id, rebuild uses it
+    instead of fabricating 'resume_<n>'. A stricter LLM provider would
+    reject fabricated IDs whose paired function_response doesn't reference
+    the original function_call id.
+    """
+    j = Journal(ws)
+    j.log_tool_call(
+        tool="take_note",
+        args={"category": "observation", "content": "x"},
+        result_summary="noted",
+        tool_call_id="orig_42",
+    )
+    msgs = resume.rebuild_conversation(ws)
+    assert msgs[0].tool_calls[0].id == "orig_42"
+
+
+def test_rebuild_falls_back_to_resume_id_when_missing(ws):
+    """F8: back-compat with old journals that don't carry tool_call_id."""
+    j = Journal(ws)
+    # log_tool_call without tool_call_id (default behaviour)
+    j.log_tool_call(tool="take_note", args={"category": "observation", "content": "x"}, result_summary="noted")
+    msgs = resume.rebuild_conversation(ws)
+    assert msgs[0].tool_calls[0].id == "resume_0"

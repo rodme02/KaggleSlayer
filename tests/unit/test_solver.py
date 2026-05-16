@@ -144,6 +144,32 @@ def test_solver_context_carries_target_metric_problem_type(tmp_path):
     assert ctx.finished is False
 
 
+def test_solver_journals_original_tool_call_id(tmp_path):
+    """F8: the Solver passes ToolCall.id through to the journal so resume
+    can preserve the original LLM-issued id instead of fabricating one.
+    """
+    ws = _make_workspace_and_ctx(tmp_path)
+    client = _CannedClient(responses=[
+        Response(text="",
+                 tool_calls=[ToolCall(id="call_xyz_42",
+                                      name="take_note",
+                                      args={"category": "observation", "content": "x"})],
+                 usage=Usage(0, 0, 0)),
+        Response(text="",
+                 tool_calls=[ToolCall(id="call_done_1", name="done", args={"summary": "fin"})],
+                 usage=Usage(0, 0, 0)),
+    ])
+    solver = Solver(workspace=ws, llm_client=client, max_iterations=5)
+    solver.solve()
+
+    import json
+    records = [json.loads(line) for line in ws.run_log_path.read_text().splitlines()]
+    take_note_rec = next(r for r in records if r["tool"] == "take_note")
+    assert take_note_rec["tool_call_id"] == "call_xyz_42"
+    done_rec = next(r for r in records if r["tool"] == "done")
+    assert done_rec["tool_call_id"] == "call_done_1"
+
+
 def test_solver_appends_model_message_with_tool_calls(tmp_path):
     """When the LLM returns a tool call, the Solver must append a
     Message(role='model', tool_calls=[...]) before the tool-result message
