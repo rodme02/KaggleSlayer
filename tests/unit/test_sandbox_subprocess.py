@@ -92,3 +92,44 @@ def test_run_subprocess_writes_script_to_scratch_dir(ws):
     scripts = list(ws.scratch_dir.glob("run_*.py"))
     assert len(scripts) >= 1
     assert "x = 1" in scripts[0].read_text()
+
+
+def test_run_subprocess_accepts_existing_script_path(ws):
+    """F7: when script_path is supplied, run_subprocess does NOT rewrite
+    the file. It just executes it. The caller (run_python) owns the file
+    so lint+run can share a single on-disk artifact instead of writing
+    twice."""
+    ws.scratch_dir.mkdir(parents=True, exist_ok=True)
+    script = ws.scratch_dir / "run_caller_owned.py"
+    script.write_text("print('owned-by-caller')")
+    pre_mtime = script.stat().st_mtime
+    result = sandbox.run_subprocess(
+        script_path=script,
+        workspace=ws,
+        timeout_s=10,
+        memory_mb=256,
+    )
+    assert result.returncode == 0
+    assert "owned-by-caller" in result.stdout
+    # The path returned matches what the caller passed in (no rename).
+    assert result.script_path == script
+    # And the file content has not been overwritten by run_subprocess.
+    assert script.exists()
+    assert script.read_text() == "print('owned-by-caller')"
+    assert script.stat().st_mtime == pre_mtime
+
+
+def test_run_subprocess_with_code_writes_run_ts_py(ws):
+    """F7: when script_path is None (default), run_subprocess keeps the
+    original behavior: write code to a fresh run_<ts>.py."""
+    result = sandbox.run_subprocess(
+        code="print('still works')",
+        workspace=ws,
+        timeout_s=10,
+        memory_mb=256,
+    )
+    assert result.returncode == 0
+    assert "still works" in result.stdout
+    assert result.script_path.parent == ws.scratch_dir
+    assert result.script_path.name.startswith("run_")
+    assert result.script_path.suffix == ".py"

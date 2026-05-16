@@ -44,9 +44,14 @@ def test_run_python_propagates_non_zero_exit(ctx):
 
 
 def test_run_python_rejects_lint_violations(ctx):
-    """The code is AST-linted before exec; os.remove must be rejected."""
+    """The code is AST-linted before exec; os.remove must be rejected.
+
+    F7: after lint failure the freshly-written run_*.py must NOT be left
+    behind — the script never executed, so no debug trace is warranted.
+    """
     with pytest.raises(ToolError, match="lint"):
         ph.run_python(ctx, code="import os; os.remove('train.csv')")
+    assert list(ctx.workspace.scratch_dir.glob("run_*.py")) == []
 
 
 def test_run_python_rejects_subprocess_imports(ctx):
@@ -71,10 +76,15 @@ def test_run_python_caps_output_size(ctx):
 
 
 def test_run_python_writes_script_to_scratch(ctx):
+    """F7: run_python writes ONE file (run_<ts>.py) that is both linted
+    and executed. After Batch 2 there is no separate lint_<ts>.py
+    intermediate."""
     ph.run_python(ctx, code="print('persisted')")
     scripts = list(ctx.workspace.scratch_dir.glob("run_*.py"))
     assert len(scripts) >= 1
     assert "persisted" in scripts[0].read_text()
+    # No phantom lint_<ts>.py — F7 removed the double-write.
+    assert list(ctx.workspace.scratch_dir.glob("lint_*.py")) == []
 
 
 def test_run_python_prunes_scratch_dir_to_keep_last_20(ctx):

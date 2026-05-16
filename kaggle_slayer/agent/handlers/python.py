@@ -39,30 +39,31 @@ def run_python(
     timeout_s: int = 60,
     memory_mb: int = 2048,
 ) -> str:
-    """Lint, then run `code` in a resource-limited subprocess."""
-    # Write the script first so lint sees the actual file path. run_subprocess
-    # also writes it, but we lint a freshly-written copy so lint failures don't
-    # leave a phantom run_<ts>.py with no execution trace.
+    """Lint, then run `code` in a resource-limited subprocess.
+
+    F7: writes ONE file (run_<ts>.py) up front, lints THAT path, then hands
+    the same path to run_subprocess. Previously we wrote a lint_<ts>.py,
+    deleted it, and let run_subprocess write a second copy — twice the I/O
+    for the same payload. On lint failure the run_<ts>.py is removed so a
+    rejected snippet leaves no execution trace.
+    """
     workspace = ctx.workspace
     workspace.scratch_dir.mkdir(parents=True, exist_ok=True)
     import datetime as dt
 
     stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%d_%H%M%S_%f")
-    script_path = workspace.scratch_dir / f"lint_{stamp}.py"
+    script_path = workspace.scratch_dir / f"run_{stamp}.py"
     script_path.write_text(code)
 
     lint = sandbox.lint_module(script_path)
     if not lint.ok:
-        # Remove the failed-lint phantom so scratch/ stays useful.
+        # Remove the rejected script — it never executes, so no debug trace.
         script_path.unlink(missing_ok=True)
         violations = "; ".join(lint.violations[:5])
         raise ToolError(f"lint failed: {violations}")
 
-    # Lint passed — remove the duplicate; run_subprocess writes its own copy.
-    script_path.unlink(missing_ok=True)
-
     result = sandbox.run_subprocess(
-        code=code,
+        script_path=script_path,
         workspace=workspace,
         timeout_s=timeout_s,
         memory_mb=memory_mb,

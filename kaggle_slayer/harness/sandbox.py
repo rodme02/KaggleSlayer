@@ -259,26 +259,40 @@ def _preexec_setrlimit(memory_bytes: int, cpu_seconds: int) -> None:
 
 def run_subprocess(
     *,
-    code: str,
+    code: str | None = None,
+    script_path: Path | None = None,
     workspace: _Workspace,
     timeout_s: int = 60,
     memory_mb: int = 2048,
 ) -> SubprocessResult:
-    """Run Python `code` in an isolated subprocess scoped to the workspace.
+    """Run Python in an isolated subprocess scoped to the workspace.
 
-    Writes `code` to `workspace.scratch_dir/run_<ts>.py` for debuggability,
-    invokes `python <script>` with `cwd=workspace.root`, applies RLIMIT_AS
-    and RLIMIT_CPU via preexec_fn, and enforces wall-clock via subprocess
-    `timeout`. Returns a SubprocessResult capturing stdout/stderr/returncode
-    and a `killed_reason` string for timeout/memory kills.
+    Two input modes (exactly one required):
+      - `code`: write to a fresh `workspace.scratch_dir/run_<ts>.py`,
+        then execute. Backwards-compatible default.
+      - `script_path`: execute an existing file as-is (F7). The caller
+        owns the file — `run_subprocess` does NOT rewrite or rename it.
+        This lets `run_python` lint and run the SAME on-disk artifact
+        instead of writing it twice.
 
-    The caller is responsible for AST-linting `code` first (e.g., by writing
-    it to a file and calling `lint_module`). This function does not lint.
+    Invokes `python <script>` with `cwd=workspace.root`, applies RLIMIT_AS,
+    RLIMIT_CPU, RLIMIT_NPROC, RLIMIT_FSIZE via preexec_fn, and enforces
+    wall-clock via subprocess `timeout`. Returns a SubprocessResult
+    capturing stdout/stderr/returncode and a `killed_reason` string for
+    timeout/memory kills.
+
+    The caller is responsible for AST-linting first (e.g., by writing the
+    code to a file and calling `lint_module`). This function does not lint.
     """
+    if (code is None) == (script_path is None):
+        raise ValueError("run_subprocess requires exactly one of `code` or `script_path`")
+
     workspace.scratch_dir.mkdir(parents=True, exist_ok=True)
-    stamp = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%d_%H%M%S_%f")
-    script_path = workspace.scratch_dir / f"run_{stamp}.py"
-    script_path.write_text(code)
+    if script_path is None:
+        assert code is not None  # narrowed for mypy
+        stamp = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%d_%H%M%S_%f")
+        script_path = workspace.scratch_dir / f"run_{stamp}.py"
+        script_path.write_text(code)
 
     memory_bytes = max(1, memory_mb) * 1024 * 1024
     preexec = None
