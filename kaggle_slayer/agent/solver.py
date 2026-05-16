@@ -208,17 +208,31 @@ class Solver:
         return spent > self.cost_budget_usd
 
     def _gate_cost_budget(self) -> bool:
+        """Ask the user to raise the cost budget. APPROVE doubles it (F4).
+
+        Without the doubling, every subsequent iteration sees `spent > budget`
+        again and the user is re-prompted on every turn. Mirrors the wall-
+        clock pattern, which resets the timer on APPROVE.
+        """
         if self.checkpoint_handler is None or self.cost_ledger is None:
             return False
         from kaggle_slayer.harness import checkpoints as cp  # noqa: PLC0415
 
         spent = float(self.cost_ledger.total_for(competition=self.workspace.name))
+        new_budget = self.cost_budget_usd * 2.0 if self.cost_budget_usd is not None else None
         decision = self.checkpoint_handler.request(cp.CheckpointRequest(
             trigger=cp.CheckpointTrigger.COST_BUDGET,
-            action="cost budget exceeded — raise it?",
-            evidence={"spent_usd": spent, "budget_usd": self.cost_budget_usd},
+            action="cost budget exceeded — raise it by 2x?",
+            evidence={
+                "spent_usd": spent,
+                "budget_usd": self.cost_budget_usd,
+                "if_approved_new_budget_usd": new_budget,
+            },
         ))
-        return decision in (cp.Decision.APPROVE, cp.Decision.SKIP_CHECK)
+        approved = decision in (cp.Decision.APPROVE, cp.Decision.SKIP_CHECK)
+        if approved and self.cost_budget_usd is not None:
+            self.cost_budget_usd *= 2.0
+        return approved
 
 
 def _cap_tool_result(text: str) -> str:

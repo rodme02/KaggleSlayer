@@ -337,6 +337,159 @@ def test_solver_cost_budget_checkpoint(tmp_path):
     assert result.status == "cost_budget_exceeded"
 
 
+def test_solver_cost_budget_approval_doubles_budget(tmp_path):
+    """F4: APPROVE on the cost-budget gate must DOUBLE cost_budget_usd so it
+    doesn't re-fire on the very next iteration.
+
+    Without the fix, every subsequent iteration sees `spent > budget` again
+    and the user must answer 'yes' every single turn.
+    """
+    from unittest.mock import MagicMock
+
+    from kaggle_slayer.harness import checkpoints as cp
+    from kaggle_slayer.harness.journal import Journal
+
+    ws = _make_workspace_and_ctx(tmp_path)
+    journal = Journal(ws)
+    handler = cp.CheckpointHandler(
+        mode=cp.HandlerMode.STUB, journal=journal, stub_decision=cp.Decision.APPROVE
+    )
+    ledger = MagicMock()
+    ledger.total_for = MagicMock(return_value=0.10)  # spent
+
+    # Three thinking responses, then a done call so the loop exits cleanly.
+    responses = [
+        Response(text="t1", tool_calls=[], usage=Usage(0, 0, 0)),
+        Response(text="t2", tool_calls=[], usage=Usage(0, 0, 0)),
+        Response(
+            text="",
+            tool_calls=[ToolCall(id="x", name="done", args={"summary": "fin"})],
+            usage=Usage(0, 0, 0),
+        ),
+    ]
+    client = _CannedClient(responses=responses)
+    solver = Solver(
+        workspace=ws,
+        llm_client=client,
+        max_iterations=10,
+        checkpoint_handler=handler,
+        cost_ledger=ledger,
+        cost_budget_usd=0.05,
+    )
+    result = solver.solve()
+    assert result.status == "done", (
+        f"expected loop to finish on done, got {result.status} — "
+        f"gate likely re-fired and exited early"
+    )
+    # Budget doubled exactly once (spent 0.10 stayed flat → only first gate fires).
+    assert solver.cost_budget_usd == 0.10
+    # The journal must contain exactly one cost_budget checkpoint record.
+    import json
+    cp_records = [
+        json.loads(line) for line in ws.run_log_path.read_text().splitlines()
+        if json.loads(line).get("kind") == "checkpoint"
+    ]
+    cost_cps = [r for r in cp_records if r["trigger"] == "cost_budget"]
+    assert len(cost_cps) == 1, (
+        f"expected one cost_budget checkpoint after doubling, got {len(cost_cps)}"
+    )
+
+
+def test_solver_cost_budget_evidence_includes_doubled_target(tmp_path):
+    """F4: the cost-budget checkpoint request should surface the post-approval
+    budget in its evidence dict so the prompt can show the user what 'yes' costs."""
+    from unittest.mock import MagicMock
+
+    from kaggle_slayer.harness import checkpoints as cp
+    from kaggle_slayer.harness.journal import Journal
+
+    ws = _make_workspace_and_ctx(tmp_path)
+    journal = Journal(ws)
+
+    captured: list[cp.CheckpointRequest] = []
+
+    def prompt(req: cp.CheckpointRequest) -> cp.Decision:
+        captured.append(req)
+        return cp.Decision.APPROVE
+
+    handler = cp.CheckpointHandler(mode=cp.HandlerMode.CALLABLE, journal=journal, prompt_fn=prompt)
+    ledger = MagicMock()
+    ledger.total_for = MagicMock(return_value=0.10)
+
+    responses = [
+        Response(
+            text="",
+            tool_calls=[ToolCall(id="x", name="done", args={"summary": "fin"})],
+            usage=Usage(0, 0, 0),
+        ),
+    ]
+    client = _CannedClient(responses=responses)
+    solver = Solver(
+        workspace=ws,
+        llm_client=client,
+        max_iterations=5,
+        checkpoint_handler=handler,
+        cost_ledger=ledger,
+        cost_budget_usd=0.05,
+    )
+    solver.solve()
+    assert captured, "expected at least one checkpoint request"
+    cost_req = next(r for r in captured if r.trigger == cp.CheckpointTrigger.COST_BUDGET)
+    assert cost_req.evidence["spent_usd"] == 0.10
+    assert cost_req.evidence["budget_usd"] == 0.05
+    assert cost_req.evidence["if_approved_new_budget_usd"] == 0.10
+
+
+def test_solver_wall_clock_approval_extends_budget(tmp_path):
+    """F17: symmetry test — APPROVE on the wall-clock gate must let the loop
+    make at least one LLM call past the original deadline.
+
+    Without the extension (DENY on first gate), the loop exits with zero LLM
+    calls. With APPROVE, the loop continues into iteration 1 (one LLM call)
+    before the next gate (DENY) ends it on iteration 2. This is the symmetry
+    test that would have caught F4 in the cost-budget path.
+    """
+    from kaggle_slayer.harness import checkpoints as cp
+    from kaggle_slayer.harness.journal import Journal
+
+    ws = _make_workspace_and_ctx(tmp_path)
+    journal = Journal(ws)
+    # APPROVE first, then DENY — the loop should continue past gate 1 and exit on gate 2.
+    decisions = iter([cp.Decision.APPROVE, cp.Decision.DENY])
+
+    def prompt(_req: cp.CheckpointRequest) -> cp.Decision:
+        return next(decisions)
+
+    handler = cp.CheckpointHandler(mode=cp.HandlerMode.CALLABLE, journal=journal, prompt_fn=prompt)
+
+    responses = [Response(text="t", tool_calls=[], usage=Usage(0, 0, 0)) for _ in range(20)]
+    client = _CannedClient(responses=responses)
+    solver = Solver(
+        workspace=ws,
+        llm_client=client,
+        max_iterations=20,
+        time_budget_s=0.0,  # immediate; fires on the very first iteration
+        checkpoint_handler=handler,
+    )
+    solver.solve()
+    # With APPROVE on gate 1, the deadline resets and iteration 1 calls the LLM.
+    # If APPROVE didn't extend, no LLM call would have happened.
+    assert len(client.captured) >= 1, (
+        f"expected APPROVE to allow at least one LLM call past the deadline, "
+        f"got {len(client.captured)}"
+    )
+    # And exactly two wall-clock checkpoint records: APPROVE, then DENY.
+    import json
+    cp_records = [
+        json.loads(line) for line in ws.run_log_path.read_text().splitlines()
+        if json.loads(line).get("kind") == "checkpoint"
+    ]
+    wall_cp = [r for r in cp_records if r["trigger"] == "wall_clock_budget"]
+    assert len(wall_cp) == 2
+    assert wall_cp[0]["decision"] == "approve"
+    assert wall_cp[1]["decision"] == "deny"
+
+
 def test_solver_journals_full_capped_tool_result_for_resume_fidelity(tmp_path):
     """The run_log result_summary must store up to ~8KB so resume can
     reconstruct what the LLM actually saw on the original turn."""
