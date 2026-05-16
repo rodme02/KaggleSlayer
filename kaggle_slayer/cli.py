@@ -152,6 +152,14 @@ def run(argv: list[str]) -> int:
         except resume_mod.ResumeError as e:
             print(f"resume failed: {e}", file=sys.stderr)
             return 3
+        # F13: empty journal under --resume is almost always a wrong-workspace
+        # mistake; warn (don't exit) so the user spots it instead of silently
+        # starting fresh.
+        if not resume_from:
+            Console(stderr=True).print(
+                f"[yellow]warning: --resume was set but the journal at "
+                f"{workspace.run_log_path} is empty; starting fresh[/yellow]"
+            )
 
     solver = Solver(
         workspace=workspace,
