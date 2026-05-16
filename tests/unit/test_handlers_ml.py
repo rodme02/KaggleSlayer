@@ -120,6 +120,77 @@ def test_train_cv_runs_and_returns_summary(comp_ctx):
     assert "0." in result  # some score value
 
 
+def test_train_cv_tracks_min_for_lower_is_better_metric(comp_ctx, monkeypatch):
+    """F14b: train_cv updates ctx.best_cv_mean using metric.higher_is_better,
+    not a hardcoded `>`. For rmse (lower-is-better) the best CV is the MIN
+    across runs. The previous `>` hardcode flipped the direction — a worse
+    RMSE could displace a better one and then auto-approve a regression at
+    submit_kaggle.
+
+    We stub cv_mod.train_cv to return deterministic means: first call 1.0,
+    second call 2.0 (a worse rmse). best_cv_mean must remain 1.0.
+    """
+    from kaggle_slayer.harness import cv as cv_mod
+
+    comp_ctx.problem_type = "regression"
+    comp_ctx.metric_name = "rmse"
+
+    means = iter([1.0, 2.0])  # second is worse for rmse (higher)
+    real_train_cv = cv_mod.train_cv
+
+    def fake_train_cv(*args, **kwargs):
+        # Run the real CV to keep side-effects (archive, journal etc.) honest,
+        # then return a CVResult with our forced mean.
+        real = real_train_cv(*args, **kwargs)
+        forced = next(means)
+        return type(real)(
+            fold_scores=real.fold_scores,
+            mean=forced,
+            std=real.std,
+            oof=real.oof,
+            duration_s=real.duration_s,
+            metadata=real.metadata,
+        )
+
+    monkeypatch.setattr(ml_h.cv_mod, "train_cv", fake_train_cv)
+
+    ml_h.train_cv(comp_ctx)
+    assert comp_ctx.best_cv_mean == 1.0  # first run sets it
+    ml_h.train_cv(comp_ctx)
+    # Second run had a higher (worse) rmse — best_cv_mean must NOT regress.
+    assert comp_ctx.best_cv_mean == 1.0
+
+
+def test_train_cv_tracks_max_for_higher_is_better_metric(comp_ctx, monkeypatch):
+    """F14b counterpart: for accuracy (higher-is-better), best is the MAX.
+    Ensures the new direction-aware code preserves the original behavior
+    for higher-is-better metrics."""
+    from kaggle_slayer.harness import cv as cv_mod
+
+    means = iter([0.7, 0.85])  # second is better for accuracy (higher)
+    real_train_cv = cv_mod.train_cv
+
+    def fake_train_cv(*args, **kwargs):
+        real = real_train_cv(*args, **kwargs)
+        forced = next(means)
+        return type(real)(
+            fold_scores=real.fold_scores,
+            mean=forced,
+            std=real.std,
+            oof=real.oof,
+            duration_s=real.duration_s,
+            metadata=real.metadata,
+        )
+
+    monkeypatch.setattr(ml_h.cv_mod, "train_cv", fake_train_cv)
+
+    ml_h.train_cv(comp_ctx)
+    assert comp_ctx.best_cv_mean == 0.7
+    ml_h.train_cv(comp_ctx)
+    # Higher-is-better: 0.85 > 0.7, so it updates.
+    assert comp_ctx.best_cv_mean == 0.85
+
+
 def test_train_cv_archives_fe_and_model_to_versions(comp_ctx):
     ml_h.train_cv(comp_ctx)
     assert (comp_ctx.workspace.versions_dir / "fe_v01.py").exists()

@@ -123,8 +123,16 @@ def train_cv(ctx: Any) -> str:
         f"duration_s={result.duration_s:.2f}"
     )
     # Track best CV for the regression-aware submit_kaggle gate (spec §9).
+    # F14b: direction is metric-dependent. For accuracy/auc/r2 the best is the
+    # max; for rmse/mae/logloss the best is the min. The previous hardcoded `>`
+    # meant a WORSE rmse could displace a better one, then auto-approve a real
+    # regression at submit_kaggle. Resolve direction from the registry.
     prior = getattr(ctx, "best_cv_mean", None)
-    if prior is None or result.mean > prior:
+    if metric.higher_is_better:
+        is_better = prior is None or result.mean > prior
+    else:
+        is_better = prior is None or result.mean < prior
+    if is_better:
         ctx.best_cv_mean = float(result.mean)
     return summary
 
