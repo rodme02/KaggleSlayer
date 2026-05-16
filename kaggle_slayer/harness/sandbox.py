@@ -15,9 +15,14 @@ For an adversarial threat model, upgrade to subprocess-isolated execution
 with a real sandbox (Docker, gVisor, or seccomp filter).
 
 Resource limits (subprocess + setrlimit) ship in `run_subprocess` below —
-used by the `run_python` tool. Note: macOS does not reliably enforce
-RLIMIT_AS; the memory cap is a best-effort on Darwin and a hard cap on
-Linux.
+used by the `run_python` tool. We currently set RLIMIT_AS (memory),
+RLIMIT_CPU (cpu time), RLIMIT_NPROC (process count, blocks fork bombs
+like `multiprocessing.Pool(10000)`), and RLIMIT_FSIZE (per-file write
+cap, blocks runaway `to_csv` calls from filling the disk — F10). Not
+every POSIX implementation exposes every rlimit; each setrlimit call is
+wrapped in contextlib.suppress so a missing limit on a given platform
+degrades silently. macOS does not reliably enforce RLIMIT_AS; the memory
+cap is best-effort on Darwin and a hard cap on Linux.
 """
 
 from __future__ import annotations
@@ -249,20 +254,46 @@ class SubprocessResult:
     script_path: Path
 
 
-def _preexec_setrlimit(memory_bytes: int, cpu_seconds: int) -> None:
+_DEFAULT_NPROC_LIMIT: int = 64
+_DEFAULT_FSIZE_LIMIT: int = 10 * 1024**3  # 10 GiB
+
+
+def _preexec_setrlimit(
+    memory_bytes: int,
+    cpu_seconds: int,
+    *,
+    nproc_limit: int = _DEFAULT_NPROC_LIMIT,
+    fsize_limit: int = _DEFAULT_FSIZE_LIMIT,
+) -> None:
     """preexec_fn payload — POSIX-only. Sets per-process limits before exec.
 
     Errors from RLIMIT_AS are swallowed because Darwin rejects the call with
     "current limit exceeds maximum limit" (the inherited soft limit on macOS
     can exceed any value setrlimit will accept); we still try the call so
     Linux gets a hard cap. RLIMIT_CPU works on both platforms.
+
+    F10: also clamp process count (RLIMIT_NPROC) and per-file write size
+    (RLIMIT_FSIZE) to block fork bombs and disk-fill bugs. Each rlimit is
+    wrapped in its own suppress because not every BSD has every constant
+    (e.g., RLIMIT_NPROC may be absent), and the platform-default may sit
+    below our requested ceiling — we'd rather degrade silently than refuse
+    to launch the subprocess.
     """
     # Memory cap (address space). macOS often rejects RLIMIT_AS; degrade silently.
     with contextlib.suppress(OSError, ValueError):
         _resource.setrlimit(_resource.RLIMIT_AS, (memory_bytes, memory_bytes))
     # CPU-time cap as a backstop against busy loops the wall-clock timeout might
     # race with (e.g., kernel scheduling slop). Same value as wall-clock for now.
-    _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+    with contextlib.suppress(OSError, ValueError):
+        _resource.setrlimit(_resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
+    # Process count: blocks `multiprocessing.Pool(10000)` typos. Joblib's
+    # default n_jobs=-1 sits well under 64 on a typical dev/CI box.
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        _resource.setrlimit(_resource.RLIMIT_NPROC, (nproc_limit, nproc_limit))
+    # Per-file write cap: blocks `df.to_csv('huge.csv')` from filling the
+    # workspace volume. 10 GiB is comfortably above any real submission.
+    with contextlib.suppress(OSError, ValueError, AttributeError):
+        _resource.setrlimit(_resource.RLIMIT_FSIZE, (fsize_limit, fsize_limit))
 
 
 def run_subprocess(
