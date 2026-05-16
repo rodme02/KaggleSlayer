@@ -67,11 +67,16 @@ def test_rebuild_skips_checkpoint_records(ws):
 
 
 def test_rebuild_raises_when_done_already_called(ws):
-    """A workspace whose last tool_call was 'done' has nothing to resume."""
+    """A workspace whose last tool_call was 'done' has nothing to resume.
+
+    F15: the error message says 'last tool reference' rather than 'last tool
+    call' because 'done' could land as either a tool_call OR a tool_error
+    record (if the done handler ever raised).
+    """
     j = Journal(ws)
     j.log_tool_call(tool="write_file", args={"path": "x", "content": "y"}, result_summary="ok")
     j.log_tool_call(tool="done", args={"summary": "all done"}, result_summary="ack")
-    with pytest.raises(resume.ResumeError, match="already finished"):
+    with pytest.raises(resume.ResumeError, match="last tool reference was 'done'"):
         resume.rebuild_conversation(ws)
 
 
@@ -106,3 +111,32 @@ def test_rebuild_falls_back_to_resume_id_when_missing(ws):
     j.log_tool_call(tool="take_note", args={"category": "observation", "content": "x"}, result_summary="noted")
     msgs = resume.rebuild_conversation(ws)
     assert msgs[0].tool_calls[0].id == "resume_0"
+
+
+def test_rebuild_preserves_tool_call_order_with_interleaved_checkpoints(ws):
+    """F16: realistic interleave: tool_call, checkpoint, tool_call, checkpoint,
+    tool_call. The two checkpoint records are silently skipped; the three
+    tool_calls emerge in order as 3 model + 3 tool = 6 messages.
+    """
+    j = Journal(ws)
+    j.log_tool_call(tool="take_note", args={"category": "observation", "content": "x"}, result_summary="noted")
+    j._append(ws.run_log_path, {  # noqa: SLF001
+        "ts": "2026-05-15T10:00:00", "kind": "checkpoint", "trigger": "set_metric",
+        "action": "change metric", "evidence": {}, "decision": "approve",
+    })
+    j.log_tool_call(tool="write_file", args={"path": "agent/fe.py", "content": "..."},
+                    result_summary="wrote 3 bytes")
+    j._append(ws.run_log_path, {  # noqa: SLF001
+        "ts": "2026-05-15T10:01:00", "kind": "checkpoint",
+        "trigger": "submit_kaggle_first", "action": "first submit",
+        "evidence": {}, "decision": "approve",
+    })
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.82")
+
+    msgs = resume.rebuild_conversation(ws)
+    # 3 tool_calls → 6 messages; 2 checkpoints silently skipped
+    assert len(msgs) == 6
+    # Model-role messages preserve the chronological tool order
+    model_msgs = [m for m in msgs if m.role == "model"]
+    assert len(model_msgs) == 3
+    assert [m.tool_calls[0].name for m in model_msgs] == ["take_note", "write_file", "train_cv"]

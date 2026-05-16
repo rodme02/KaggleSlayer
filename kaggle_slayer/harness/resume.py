@@ -91,8 +91,10 @@ def rebuild_conversation(workspace: Workspace) -> list[Message]:
         None,
     )
     if last_tool_record is not None and last_tool_record.get("tool") == "done":
+        # F15: 'done' could appear as either tool_call or tool_error, so the
+        # wording is "last tool reference" rather than "last tool call".
         raise ResumeError(
-            "workspace already finished (last tool call was 'done'); "
+            "workspace already finished (last tool reference was 'done'); "
             "delete run_log.jsonl to start fresh"
         )
 
