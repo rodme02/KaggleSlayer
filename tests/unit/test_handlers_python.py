@@ -75,3 +75,26 @@ def test_run_python_writes_script_to_scratch(ctx):
     scripts = list(ctx.workspace.scratch_dir.glob("run_*.py"))
     assert len(scripts) >= 1
     assert "persisted" in scripts[0].read_text()
+
+
+def test_run_python_prunes_scratch_dir_to_keep_last_20(ctx):
+    """F2: scratch/run_*.py accumulates indefinitely without GC. After
+    >20 invocations the directory must be pruned to the 20 most-recent
+    files by mtime. Unique payload per call keeps the timestamp distinct
+    across the %f microsecond field."""
+    for i in range(25):
+        ph.run_python(ctx, code=f"print({i})")
+    remaining = list(ctx.workspace.scratch_dir.glob("run_*.py"))
+    assert len(remaining) == 20
+
+
+def test_run_python_prunes_only_run_files_not_others(ctx):
+    """F2: pruning must be scoped to run_*.py — pre-existing files in
+    scratch_dir (notes, dumps, etc.) survive."""
+    keepers = ctx.workspace.scratch_dir
+    keepers.mkdir(parents=True, exist_ok=True)
+    (keepers / "keep_me.py").write_text("# user note")
+    for i in range(25):
+        ph.run_python(ctx, code=f"print({i})")
+    assert (keepers / "keep_me.py").exists()
+    assert len(list(keepers.glob("run_*.py"))) == 20
