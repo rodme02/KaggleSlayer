@@ -60,6 +60,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Skip rebuilding context.md (use existing one)")
     p.add_argument("--resume", action="store_true",
                    help="Resume from run_log.jsonl (rebuilds conversation history)")
+    p.add_argument("--rebuild-context", action="store_true",
+                   help="With --resume, force a fresh build_context (default: skip on resume to avoid replay drift)")
     p.add_argument("--cost-budget", type=float, default=None,
                    help="USD cost cap; checkpoint fires when exceeded")
     p.add_argument("--auto-approve", choices=["off", "safe", "all"], default="off",
@@ -106,8 +108,12 @@ def run(argv: list[str]) -> int:
         print("ERROR: no GEMINI_API_KEY / GOOGLE_API_KEY in env", file=sys.stderr)
         return 2
 
-    # Build context.md unless user opts out
-    if not args.no_context_build:
+    # Build context.md unless user opts out. On --resume, default to skipping
+    # the rebuild — regenerating context.md while the resumed conversation
+    # history references the original would cause replay drift. Opt back in
+    # via --rebuild-context.
+    skip_context = args.no_context_build or (args.resume and not args.rebuild_context)
+    if not skip_context:
         try:
             kaggle = KaggleClient()
             build_context(workspace=workspace, kaggle_client=kaggle)

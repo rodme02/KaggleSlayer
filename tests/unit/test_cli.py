@@ -151,6 +151,59 @@ def test_cli_auto_approve_all_with_acknowledgement_parses(tmp_path):
     assert args.i_know_what_im_doing is True
 
 
+def test_cli_resume_skips_context_build_by_default(tmp_path):
+    """F6: --resume should NOT rebuild context.md by default — doing so
+    would regenerate context.md while the resumed conversation history
+    still references the original, causing replay drift.
+    """
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    (comp_path / "raw").mkdir()
+    pd.DataFrame({"x": [1, 2], "y": [0, 1]}).to_csv(comp_path / "raw" / "train.csv", index=False)
+    pd.DataFrame({"id": [1], "x": [1]}).to_csv(comp_path / "raw" / "test.csv", index=False)
+    ws = Workspace.create(root=comp_path)
+    Journal(ws).log_tool_call(tool="take_note", args={"category": "observation", "content": "x"}, result_summary="noted")
+
+    with patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context") as mock_bc, \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(status="done", iterations=1, summary="ok")
+        mock_solver_cls.return_value = mock_solver
+
+        cli.run([str(comp_path), "--target", "y", "--resume"])
+
+    mock_bc.assert_not_called()
+
+
+def test_cli_resume_with_rebuild_context_runs_context_build(tmp_path):
+    """F6: --resume --rebuild-context is the explicit opt-in for re-running
+    build_context on a resumed run.
+    """
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    (comp_path / "raw").mkdir()
+    pd.DataFrame({"x": [1, 2], "y": [0, 1]}).to_csv(comp_path / "raw" / "train.csv", index=False)
+    pd.DataFrame({"id": [1], "x": [1]}).to_csv(comp_path / "raw" / "test.csv", index=False)
+    ws = Workspace.create(root=comp_path)
+    Journal(ws).log_tool_call(tool="take_note", args={"category": "observation", "content": "x"}, result_summary="noted")
+
+    with patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context") as mock_bc, \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(status="done", iterations=1, summary="ok")
+        mock_solver_cls.return_value = mock_solver
+
+        cli.run([str(comp_path), "--target", "y", "--resume", "--rebuild-context"])
+
+    mock_bc.assert_called_once()
+
+
 def test_cli_resume_passes_rebuilt_history_to_solver(tmp_path):
     """When --resume is set and run_log.jsonl has prior tool calls, those
     messages are passed via solve(resume_from=...)."""
