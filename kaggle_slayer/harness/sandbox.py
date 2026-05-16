@@ -43,6 +43,14 @@ _FORBIDDEN_ATTR_CALLS: tuple[tuple[str, ...], ...] = (
     ("os", "removedirs"),
     ("os", "system"),
     ("os", "popen"),
+    # F9: file aliasing primitives. A symlink/hardlink inside the workspace
+    # defeats path-prefix checks — e.g., symlink submissions/x.csv → agent/fe.py
+    # would let submit_kaggle "read" through the alias. rename/replace move
+    # files in surprising ways for the same class of attack.
+    ("os", "symlink"),
+    ("os", "link"),
+    ("os", "rename"),
+    ("os", "replace"),
     ("shutil", "rmtree"),
     ("shutil", "move"),
     ("subprocess",),  # any subprocess.* call

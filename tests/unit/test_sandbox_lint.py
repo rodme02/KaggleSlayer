@@ -217,3 +217,57 @@ def test_lint_catches_os_system_even_when_os_path_was_imported(tmp_path):
     result = sandbox.lint_module(p)
     assert not result.ok
     assert any("os.system" in v for v in result.violations)
+
+
+def test_lint_rejects_os_symlink(tmp_path):
+    """F9: os.symlink can plant aliases pointing back into the workspace,
+    defeating path-prefix checks (e.g., symlink agent/fe.py to a submission)."""
+    p = _write(tmp_path, "bad.py", """
+        import os
+        def fit_feature_transformer(train_df, target_col):
+            os.symlink("/etc/passwd", "x")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("os.symlink" in v for v in result.violations)
+
+
+def test_lint_rejects_os_link(tmp_path):
+    """F9: os.link (hard link) shares the inode and bypasses path checks
+    the same way os.symlink does."""
+    p = _write(tmp_path, "bad.py", """
+        import os
+        def fit_feature_transformer(train_df, target_col):
+            os.link("a", "b")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("os.link" in v for v in result.violations)
+
+
+def test_lint_rejects_os_rename(tmp_path):
+    """F9: os.rename can move agent-authored files into unexpected slots."""
+    p = _write(tmp_path, "bad.py", """
+        import os
+        def fit_feature_transformer(train_df, target_col):
+            os.rename("a", "b")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("os.rename" in v for v in result.violations)
+
+
+def test_lint_rejects_os_replace(tmp_path):
+    """F9: os.replace is os.rename with overwrite — same risk."""
+    p = _write(tmp_path, "bad.py", """
+        import os
+        def fit_feature_transformer(train_df, target_col):
+            os.replace("a", "b")
+            return None
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+    assert any("os.replace" in v for v in result.violations)
