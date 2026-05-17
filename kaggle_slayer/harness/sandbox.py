@@ -334,11 +334,19 @@ def run_subprocess(
         script_path.write_text(code)
 
     memory_bytes = max(1, memory_mb) * 1024 * 1024
+    # CPU rlimit must comfortably outlast the wall-clock cap so the parent's
+    # `subprocess.run(timeout=...)` reliably wins the race. Without the buffer,
+    # Linux's kernel-level RLIMIT_CPU sends SIGKILL at exactly `timeout_s` and
+    # we lose the chance to classify the kill as "timeout" — the parent sees
+    # returncode=-9 and our heuristic mis-attributes it as "memory" (caught
+    # by CI on 3.11/3.12). macOS doesn't enforce RLIMIT_CPU strictly so it's
+    # a no-op there.
+    cpu_cap_s = timeout_s + 2
     preexec = None
     if _sys.platform != "win32":
         # Bind the two arguments at closure-construction time.
         def preexec() -> None:  # noqa: ANN202 — used only by subprocess
-            _preexec_setrlimit(memory_bytes, timeout_s)
+            _preexec_setrlimit(memory_bytes, cpu_cap_s)
 
     try:
         completed = _subprocess.run(
