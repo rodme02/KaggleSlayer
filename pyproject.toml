@@ -57,6 +57,7 @@ dev = [
 
 [project.scripts]
 kaggle-slayer = "kaggle_slayer.cli:main"
+kaggle-slayer-dashboard = "kaggle_slayer.dashboard.app:main"
 
 [project.urls]
 Homepage = "https://github.com/rodme02/KaggleSlayer"
