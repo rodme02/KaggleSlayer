@@ -19,14 +19,17 @@ def test_tracer_writes_span_to_workspace_otel_jsonl(ws):
     tracer = otel.make_tracer(ws, run_name="solve")
     with tracer.start_span("hello", attributes={"k": "v"}) as span:
         span.set_attribute("more", 1)
-    # Flush the BatchSpanProcessor so the file gets the span.
+    # shutdown() is a no-op now; writes are sync.
     otel.shutdown()
 
     path = ws.root / "otel.jsonl"
     assert path.exists()
     records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    # make_tracer writes a synthetic `run:<name>` span; expect 1 (root) + 1 (hello)
+    # make_tracer writes a boundary marker; expect 1 (marker) + 1 (hello)
     assert len(records) == 2
+    marker = next(r for r in records if r["name"].startswith("run:"))
+    assert marker["status"] == "MARKER"
+    assert marker["duration_ns"] == 0
     hello = next(r for r in records if r["name"] == "hello")
     assert hello["attributes"]["k"] == "v"
     assert hello["attributes"]["more"] == 1
@@ -74,3 +77,20 @@ def test_tracer_records_exception_status(ws):
     rec = next(r for r in records if r["name"] == "failing")
     assert rec["status"] == "ERROR"
     assert "boom" in rec.get("error", "")
+
+
+def test_set_attribute_after_span_exit_does_not_mutate_written_record(ws):
+    """The record is sealed at write time; later mutations on the Span
+    object must not change what was already appended to the JSONL file."""
+    tracer = otel.make_tracer(ws, run_name="solve")
+    with tracer.start_span("sealed", attributes={"early": "yes"}) as span:
+        pass
+    # Span object is still alive; mutate after context exit.
+    span.set_attribute("late", True)
+    otel.shutdown()
+
+    path = ws.root / "otel.jsonl"
+    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rec = next(r for r in records if r["name"] == "sealed")
+    assert rec["attributes"].get("early") == "yes"
+    assert "late" not in rec["attributes"]

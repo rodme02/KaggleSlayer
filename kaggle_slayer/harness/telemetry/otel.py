@@ -9,6 +9,10 @@ and record the error message.
 We don't ship a full OTLP collector - the JSONL file is enough for the
 dashboard and post-hoc debugging. If we ever need OTLP, swap the
 processor in `_install_processor`.
+
+Concurrency note: the tracer is single-process and single-threaded
+(Solver runs sequentially). Two concurrent writers would interleave
+records in `otel.jsonl`; no locking is added because YAGNI.
 """
 
 from __future__ import annotations
@@ -27,12 +31,9 @@ from kaggle_slayer.harness.workspace import Workspace
 
 _OTEL_FILENAME = "otel.jsonl"
 
-# Module-level state so `shutdown()` can flush after a test sets up a tracer.
-_pending_files: set[Path] = set()
-
 
 @dataclass
-class _Span:
+class Span:
     name: str
     span_id: str
     trace_id: str
@@ -46,12 +47,11 @@ class _Span:
         self.attributes[key] = value
 
 
-class _Tracer:
+class Tracer:
     def __init__(self, file_path: Path, trace_id: str) -> None:
         self._file = file_path
         self._trace_id = trace_id
-        self._stack: list[_Span] = []
-        _pending_files.add(file_path)
+        self._stack: list[Span] = []
 
     @contextlib.contextmanager
     def start_span(
@@ -59,9 +59,9 @@ class _Tracer:
         name: str,
         *,
         attributes: dict[str, Any] | None = None,
-    ) -> Iterator[_Span]:
+    ) -> Iterator[Span]:
         parent = self._stack[-1].span_id if self._stack else None
-        span = _Span(
+        span = Span(
             name=name,
             span_id=os.urandom(8).hex(),
             trace_id=self._trace_id,
@@ -82,7 +82,24 @@ class _Tracer:
             self._stack.pop()
             self._write(span, duration)
 
-    def _write(self, span: _Span, duration_ns: int) -> None:
+    def _write_marker(self, name: str) -> None:
+        """Write a boundary marker record with duration_ns=0 and status=MARKER.
+
+        Used by `make_tracer` to stamp a `run:<name>` record at the top of
+        the file so traces are easy to locate. Distinct from a real span
+        because no work was timed.
+        """
+        marker = Span(
+            name=name,
+            span_id=os.urandom(8).hex(),
+            trace_id=self._trace_id,
+            parent_span_id=None,
+            started_ns=time.perf_counter_ns(),
+            status="MARKER",
+        )
+        self._write(marker, duration_ns=0)
+
+    def _write(self, span: Span, duration_ns: int) -> None:
         record: dict[str, Any] = {
             "ts": dt.datetime.now(dt.UTC).isoformat(timespec="microseconds"),
             "trace_id": span.trace_id,
@@ -102,18 +119,20 @@ class _Tracer:
             os.fsync(f.fileno())
 
 
-def make_tracer(workspace: Workspace, *, run_name: str) -> _Tracer:
+def make_tracer(workspace: Workspace, *, run_name: str) -> Tracer:
     """Return a tracer that appends spans to <workspace>/otel.jsonl."""
     trace_id = os.urandom(16).hex()
     file_path = workspace.root / _OTEL_FILENAME
-    tracer = _Tracer(file_path=file_path, trace_id=trace_id)
-    # Stamp a synthetic root-of-trace marker so reading the file in order
-    # makes the trace boundary obvious.
-    with tracer.start_span(f"run:{run_name}"):
-        pass
+    tracer = Tracer(file_path=file_path, trace_id=trace_id)
+    # Stamp a boundary marker so reading the file in order makes the trace
+    # start obvious. Marker records have duration_ns=0 and status=MARKER.
+    tracer._write_marker(name=f"run:{run_name}")
     return tracer
 
 
 def shutdown() -> None:
-    """No-op flush; included for API compatibility with otel SDK consumers."""
-    _pending_files.clear()
+    """No-op. Kept for API compatibility with future OTel SDK swaps.
+
+    Writes are synchronous (each `_write` calls `flush()` + `fsync()`), so
+    there is nothing to flush at shutdown.
+    """
