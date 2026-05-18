@@ -264,3 +264,39 @@ def test_cli_resume_passes_rebuilt_history_to_solver(tmp_path):
     assert "resume_from" in call_kwargs
     assert call_kwargs["resume_from"] is not None
     assert len(call_kwargs["resume_from"]) >= 2  # at least one model + tool message
+
+
+def test_cli_captures_unhandled_exception_to_errors_dir(tmp_path, monkeypatch):
+    """An unhandled exception inside run() writes a crash report and returns 4."""
+    from kaggle_slayer.harness.telemetry import errors as errors_mod
+    err_dir = tmp_path / "errors"
+    monkeypatch.setattr(errors_mod, "DEFAULT_DIR", err_dir)
+
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    (comp_path / "raw").mkdir()
+    pd.DataFrame({"x": [1], "y": [0]}).to_csv(comp_path / "raw" / "train.csv", index=False)
+    pd.DataFrame({"x": [1]}).to_csv(comp_path / "raw" / "test.csv", index=False)
+
+    # Make GeminiClient construction blow up so we exercise the catch path.
+    def bad_gemini(*args, **kwargs):
+        raise RuntimeError("gemini boom")
+
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    with patch("kaggle_slayer.cli.GeminiClient", side_effect=bad_gemini), \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"):
+        exit_code = cli.run([
+            str(comp_path),
+            "--target", "y",
+            "--auto-approve", "all",
+            "--i-know-what-im-doing",
+        ])
+
+    assert exit_code == 4, f"expected exit code 4, got {exit_code}"
+    captured = list(err_dir.glob("*.json"))
+    assert len(captured) == 1
+    import json
+    rec = json.loads(captured[0].read_text())
+    assert rec["exception"]["type"] == "RuntimeError"
+    assert "gemini boom" in rec["exception"]["message"]

@@ -19,6 +19,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -87,6 +88,33 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def run(argv: list[str]) -> int:
+    """Outer CLI entry: catches unhandled exceptions and captures crash reports."""
+    try:
+        return _run_inner(argv)
+    except SystemExit:
+        raise  # let argparse's sys.exit pass through
+    except KeyboardInterrupt:
+        print("\ninterrupted by user", file=sys.stderr)
+        return 130
+    except Exception as e:  # noqa: BLE001 — outermost CLI catch
+        from kaggle_slayer.harness.telemetry import errors  # noqa: PLC0415
+        # Best-effort: collect the last few journal records if a workspace path
+        # was parsed. If anything in the recovery itself fails, fall through.
+        recent_calls: list[dict[str, Any]] = []
+        try:
+            parsed = _parse_args(argv)
+            ws = Workspace(root=Path(parsed.workspace_path))
+            if ws.run_log_path.exists():
+                recent_calls = list(Journal(ws).iter_records())[-10:]
+        except Exception:  # noqa: BLE001
+            pass
+        path = errors.capture(e, recent_calls=recent_calls, env=dict(os.environ))
+        print(f"\nERROR: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"crash report written to {path}", file=sys.stderr)
+        return 4
+
+
+def _run_inner(argv: list[str]) -> int:
     args = _parse_args(argv)
     load_dotenv()
 
