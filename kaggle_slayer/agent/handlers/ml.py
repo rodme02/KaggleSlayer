@@ -103,15 +103,28 @@ def train_cv(ctx: Any) -> str:
     metric = metrics.get(ctx.metric_name)
 
     # 3. Run CV with the peeked names so metadata stays accurate.
-    result = cv_mod.train_cv(
-        fe_path=fe_path,
-        model_path=model_path,
-        train_df=train_df,
-        target_col=ctx.target_col,
-        cv=cv,
-        metric=metric,
-        metadata_extra={"fe_version": fe_archive.stem, "model_version": model_archive.stem},
-    )
+    from kaggle_slayer.harness.telemetry import mlflow_logger  # noqa: PLC0415
+    with mlflow_logger.log_train_cv(
+        competition=ctx.workspace.name,
+        cv_strategy=cv.name,
+        metric=metric.name,
+        fe_version=fe_archive.stem,
+        model_version=model_archive.stem,
+    ) as run_logger:
+        result = cv_mod.train_cv(
+            fe_path=fe_path,
+            model_path=model_path,
+            train_df=train_df,
+            target_col=ctx.target_col,
+            cv=cv,
+            metric=metric,
+            metadata_extra={"fe_version": fe_archive.stem, "model_version": model_archive.stem},
+        )
+        run_logger.log_result(
+            cv_mean=result.mean,
+            cv_std=result.std,
+            fold_scores=list(result.fold_scores),
+        )
 
     # 4. Only on success: archive. Any exception above skips this.
     shutil.copyfile(fe_path, fe_archive)

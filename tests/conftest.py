@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pandas as pd
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _mock_mlflow(monkeypatch):
+    """Patch the mlflow module imported by the telemetry logger so train_cv calls
+    in any test don't materialise an mlflow.db / mlruns directory in cwd.
+
+    Tests that need to assert against mlflow behaviour re-patch it locally — that
+    override stacks on top of this one and is restored on teardown.
+    """
+    from kaggle_slayer.harness.telemetry import mlflow_logger
+
+    mock_ml = MagicMock()
+    mock_ml.start_run.return_value.__enter__.return_value = MagicMock()
+    mock_ml.start_run.return_value.__exit__.return_value = None
+    monkeypatch.setattr(mlflow_logger, "mlflow", mock_ml)
 
 
 @pytest.fixture
