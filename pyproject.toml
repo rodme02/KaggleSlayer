@@ -94,6 +94,7 @@ addopts = "-q --strict-markers"
 markers = [
     "slow: end-to-end / slower tests (run with -m slow)",
     "integration: integration tests with fake agent (faster than slow)",
+    "chaos: chaos tier — integration tests with injected tool/LLM failures",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
