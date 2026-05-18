@@ -48,20 +48,12 @@ def summarize(workspace: Workspace, *, stuck_window: int = 10, stuck_threshold: 
     summary.tool_counts = dict(counts)
     summary.last_call = records[-1]
 
-    # Stuck loop: tally (tool, hash(args)) over the trailing window
-    window = records[-stuck_window:]
-    sigs: Counter[tuple[str, str]] = Counter()
-    for r in window:
-        sig = (r["tool"], json.dumps(r.get("args", {}), sort_keys=True))
-        sigs[sig] += 1
-    for (tool, args_repr), count in sigs.most_common(1):
-        if count >= stuck_threshold:
-            summary.stuck_loop = {
-                "tool": tool,
-                "args": json.loads(args_repr),
-                "repeats": count,
-                "window": stuck_window,
-            }
+    # Stuck-loop detection (moved to telemetry.behavior for reuse).
+    from kaggle_slayer.harness.telemetry import behavior  # noqa: PLC0415
+
+    summary.stuck_loop = behavior.detect_stuck_loop(
+        workspace, window=stuck_window, threshold=stuck_threshold,
+    )
     return summary
 
 
