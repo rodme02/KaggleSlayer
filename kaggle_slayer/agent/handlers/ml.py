@@ -328,6 +328,20 @@ def submit_kaggle(ctx: Any, *, csv_path: str, message: str) -> str:
         message=message,
         competition=ctx.competition,
     )
+    # Record CV-LB calibration (lb_score is None until backfill).
+    from kaggle_slayer.harness.telemetry import calibration  # noqa: PLC0415
+
+    cv_strategy_name = getattr(ctx, "cv_kind", None) or (
+        "stratified_kfold" if ctx.problem_type == "classification" else "kfold"
+    )
+    calibration.record(
+        competition=ctx.competition,
+        cv_score=float(ctx.best_cv_mean) if ctx.best_cv_mean is not None else float("nan"),
+        lb_score=None,
+        problem_type=ctx.problem_type,
+        metric=ctx.metric_name,
+        cv_strategy=cv_strategy_name,
+    )
     return f"submitted '{target_csv.name}' to {ctx.competition!r} (msg={message!r})"
 
 

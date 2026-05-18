@@ -241,3 +241,45 @@ def test_classify_submit_trigger_tolerates_partial_trailing_line(tmp_path):
     lines = ctx.workspace.run_log_path.read_text().splitlines()
     cp_records = [json.loads(line) for line in lines if json.loads(line).get("kind") == "checkpoint"]
     assert cp_records[-1]["trigger"] == "submit_kaggle_non_regression"
+
+
+def test_submit_kaggle_appends_calibration_row(tmp_path, monkeypatch):
+    """Successful submit_kaggle writes a row to the calibration log."""
+    from kaggle_slayer.harness.telemetry import calibration
+
+    cal_path = tmp_path / "calibration.jsonl"
+    monkeypatch.setattr(calibration, "DEFAULT_PATH", cal_path)
+
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
+    ctx.best_cv_mean = 0.82
+    ml_h.submit_kaggle(
+        ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="baseline"
+    )
+
+    lines = cal_path.read_text().splitlines()
+    assert len(lines) == 1
+    row = json.loads(lines[0])
+    assert row["competition"] == ctx.competition
+    assert row["cv_score"] == 0.82
+    assert row["lb_score"] is None
+    assert row["metric"] == "accuracy"
+    assert row["problem_type"] == "classification"
+    # Default classification cv_strategy when ctx.cv_kind is None.
+    assert row["cv_strategy"] == "stratified_kfold"
+
+
+def test_submit_kaggle_skips_calibration_on_denial(tmp_path, monkeypatch):
+    """A denied submit must not write a calibration row."""
+    from kaggle_slayer.harness.telemetry import calibration
+
+    cal_path = tmp_path / "calibration.jsonl"
+    monkeypatch.setattr(calibration, "DEFAULT_PATH", cal_path)
+
+    ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.DENY)
+    ctx.best_cv_mean = 0.82
+    with pytest.raises(ToolError):
+        ml_h.submit_kaggle(
+            ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="x"
+        )
+
+    assert not cal_path.exists() or cal_path.read_text().strip() == ""
