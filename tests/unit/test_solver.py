@@ -550,3 +550,33 @@ def test_solver_journals_full_capped_tool_result_for_resume_fidelity(tmp_path):
     echo_record = next(r for r in records if r.get("tool") == "echo")
     # Must contain the full 4 KB (or close to it), not be truncated at 200 chars.
     assert len(echo_record["result_summary"]) >= 4000
+
+
+def test_solver_writes_otel_trace_to_workspace(tmp_path):
+    """Every Solver run emits an OTel trace; root span + child spans per
+    LLM call + per tool dispatch."""
+    import json
+    ws = _make_workspace_and_ctx(tmp_path)
+    client = _CannedClient(responses=[
+        Response(text="",
+                 tool_calls=[ToolCall(id="t1", name="take_note",
+                                      args={"category": "observation", "content": "x"})],
+                 usage=Usage(input_tokens=5, output_tokens=3, cached_tokens=0)),
+        Response(text="",
+                 tool_calls=[ToolCall(id="t2", name="done", args={"summary": "fin"})],
+                 usage=Usage(0, 0, 0)),
+    ])
+    solver = Solver(workspace=ws, llm_client=client, max_iterations=5)
+    solver.solve()
+
+    path = ws.root / "otel.jsonl"
+    assert path.exists()
+    spans = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    span_names = [s["name"] for s in spans]
+    # Root marker for the run, plus LLM-call spans, plus tool-dispatch spans
+    assert any(n.startswith("run:") for n in span_names)
+    assert any(n == "llm.call" for n in span_names)
+    assert any(n.startswith("tool:") for n in span_names)
+    # The tool-dispatch span carries the tool name as an attribute
+    tool_spans = [s for s in spans if s["name"].startswith("tool:")]
+    assert any(s["attributes"].get("tool.name") in ("take_note", "done") for s in tool_spans)

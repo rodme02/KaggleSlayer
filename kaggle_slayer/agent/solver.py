@@ -22,6 +22,7 @@ from kaggle_slayer.agent.llm_client import LLMClient, Message
 from kaggle_slayer.agent.prompts import load_system_prompt
 from kaggle_slayer.agent.tools import ToolError, ToolRegistry
 from kaggle_slayer.harness.journal import Journal
+from kaggle_slayer.harness.telemetry import otel
 from kaggle_slayer.harness.workspace import Workspace
 
 if TYPE_CHECKING:
@@ -105,6 +106,7 @@ class Solver:
             kaggle_client=kaggle_client,
             competition=workspace.name,
         )
+        self._tracer = otel.make_tracer(workspace, run_name="solve")
 
     def solve(self, *, resume_from: list[Message] | None = None) -> SolveResult:
         system_prompt = load_system_prompt()
@@ -128,75 +130,97 @@ class Solver:
             ]
         tool_decls = self.registry.to_function_declarations()
 
-        started = time.perf_counter()
-        for iteration in range(1, self.max_iterations + 1):
-            if time.perf_counter() - started > self.time_budget_s:
-                if not self._gate_wall_clock(iteration - 1):
-                    return SolveResult(status="time_exceeded", iterations=iteration - 1, summary="")
-                # Approved — extend the budget by one more cycle of the original cap.
-                started = time.perf_counter()
+        with self._tracer.start_span(
+            "solve.loop",
+            attributes={"competition": self.workspace.name, "max_iterations": self.max_iterations},
+        ):
+            started = time.perf_counter()
+            for iteration in range(1, self.max_iterations + 1):
+                if time.perf_counter() - started > self.time_budget_s:
+                    if not self._gate_wall_clock(iteration - 1):
+                        return SolveResult(status="time_exceeded", iterations=iteration - 1, summary="")
+                    # Approved — extend the budget by one more cycle of the original cap.
+                    started = time.perf_counter()
 
-            if self._cost_budget_exceeded() and not self._gate_cost_budget():
-                return SolveResult(status="cost_budget_exceeded", iterations=iteration - 1, summary="")
+                if self._cost_budget_exceeded() and not self._gate_cost_budget():
+                    return SolveResult(status="cost_budget_exceeded", iterations=iteration - 1, summary="")
 
-            response = self.llm.call(messages=messages, tools=tool_decls)
+                with self._tracer.start_span(
+                    "llm.call",
+                    attributes={"iteration": iteration, "messages": len(messages)},
+                ) as span:
+                    response = self.llm.call(messages=messages, tools=tool_decls)
+                    span.set_attribute("usage.input_tokens", response.usage.input_tokens)
+                    span.set_attribute("usage.output_tokens", response.usage.output_tokens)
+                    span.set_attribute("tool_calls", len(response.tool_calls))
 
-            if not response.tool_calls:
-                # Pure-text response. Keep the model's words in history for
-                # continuity, then loop until the agent calls done or max iter.
-                if response.text:
-                    messages.append(Message(role="model", content=response.text))
-                continue
+                if not response.tool_calls:
+                    # Pure-text response. Keep the model's words in history for
+                    # continuity, then loop until the agent calls done or max iter.
+                    if response.text:
+                        messages.append(Message(role="model", content=response.text))
+                    continue
 
-            # Tool-call response. Gemini's multi-turn protocol requires the
-            # model(function_call) turn to precede the tool(function_response)
-            # turn in history — append it before dispatching so the next call's
-            # history is well-formed.
-            messages.append(Message(
-                role="model",
-                content=response.text or "",
-                tool_calls=response.tool_calls,
-            ))
+                # Tool-call response. Gemini's multi-turn protocol requires the
+                # model(function_call) turn to precede the tool(function_response)
+                # turn in history — append it before dispatching so the next call's
+                # history is well-formed.
+                messages.append(Message(
+                    role="model",
+                    content=response.text or "",
+                    tool_calls=response.tool_calls,
+                ))
 
-            for tc in response.tool_calls:
-                tool_result_text = self._dispatch(tc.name, tc.args, tool_call_id=tc.id)
-                # Feed the result back as a tool-role message. We serialize as a
-                # small JSON payload so the LLMClient knows which tool the
-                # function_response Part should attribute to.
-                payload = json.dumps({"tool": tc.name, "result": tool_result_text})
-                messages.append(Message(role="tool", content=payload))
+                for tc in response.tool_calls:
+                    tool_result_text = self._dispatch(tc.name, tc.args, tool_call_id=tc.id)
+                    # Feed the result back as a tool-role message. We serialize as a
+                    # small JSON payload so the LLMClient knows which tool the
+                    # function_response Part should attribute to.
+                    payload = json.dumps({"tool": tc.name, "result": tool_result_text})
+                    messages.append(Message(role="tool", content=payload))
 
-                if self.ctx.finished:
-                    return SolveResult(
-                        status="done",
-                        iterations=iteration,
-                        summary=self.ctx.final_summary,
-                    )
+                    if self.ctx.finished:
+                        return SolveResult(
+                            status="done",
+                            iterations=iteration,
+                            summary=self.ctx.final_summary,
+                        )
 
-        return SolveResult(status="max_iterations", iterations=self.max_iterations, summary="")
+            return SolveResult(status="max_iterations", iterations=self.max_iterations, summary="")
 
     def _dispatch(self, name: str, args: dict[str, Any], *, tool_call_id: str | None = None) -> str:
         """Invoke a tool, journal it, return a string result (success or error)."""
-        try:
-            result = self.registry.invoke(name, ctx=self.ctx, args=args)
-            text_result = str(result)
-            self.journal.log_tool_call(
-                tool=name,
-                args=args,
-                # 8 KB matches the LLM-visible cap, so resume can replay
-                # exactly what the LLM originally saw.
-                result_summary=text_result[:8000],
-                tool_call_id=tool_call_id,
-            )
-            return _cap_tool_result(text_result)
-        except ToolError as e:
-            err_msg = f"ToolError: {e}"
-            self.journal.log_tool_error(tool=name, args=args, error=err_msg, tool_call_id=tool_call_id)
-            return err_msg
-        except Exception as e:  # noqa: BLE001
-            err_msg = f"unexpected error in {name}: {e!r}"
-            self.journal.log_tool_error(tool=name, args=args, error=err_msg, tool_call_id=tool_call_id)
-            return err_msg
+        with self._tracer.start_span(
+            f"tool:{name}",
+            attributes={"tool.name": name, "tool_call_id": tool_call_id or "anon"},
+        ) as span:
+            try:
+                result = self.registry.invoke(name, ctx=self.ctx, args=args)
+                text_result = str(result)
+                span.set_attribute("result_len", len(text_result))
+                self.journal.log_tool_call(
+                    tool=name,
+                    args=args,
+                    # 8 KB matches the LLM-visible cap, so resume can replay
+                    # exactly what the LLM originally saw.
+                    result_summary=text_result[:8000],
+                    tool_call_id=tool_call_id,
+                )
+                return _cap_tool_result(text_result)
+            except ToolError as e:
+                err_msg = f"ToolError: {e}"
+                span.set_attribute("error", err_msg)
+                self.journal.log_tool_error(
+                    tool=name, args=args, error=err_msg, tool_call_id=tool_call_id
+                )
+                return err_msg
+            except Exception as e:  # noqa: BLE001
+                err_msg = f"unexpected error in {name}: {e!r}"
+                span.set_attribute("error", err_msg)
+                self.journal.log_tool_error(
+                    tool=name, args=args, error=err_msg, tool_call_id=tool_call_id
+                )
+                return err_msg
 
     def _gate_wall_clock(self, iterations_so_far: int) -> bool:
         """Ask the checkpoint handler to extend the wall-clock budget. True = continue."""
