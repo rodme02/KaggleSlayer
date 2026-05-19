@@ -110,6 +110,8 @@ def train_cv(ctx: Any) -> str:
         metric=metric.name,
         fe_version=fe_archive.stem,
         model_version=model_archive.stem,
+        problem_type=ctx.problem_type,
+        workspace=ctx.workspace,
     ) as run_logger:
         result = cv_mod.train_cv(
             fe_path=fe_path,
@@ -124,6 +126,7 @@ def train_cv(ctx: Any) -> str:
             cv_mean=result.mean,
             cv_std=result.std,
             fold_scores=list(result.fold_scores),
+            wall_clock_s=result.duration_s,
         )
 
     # 4. Only on success: archive. Any exception above skips this.
