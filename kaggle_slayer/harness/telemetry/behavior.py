@@ -11,6 +11,7 @@ stuck-loop computation here.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,6 +20,9 @@ from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.workspace import Workspace
 
 _SUBMIT_TOOLS = frozenset({"submit_kaggle", "submit_local"})
+# Same regex shape as dashboard.portfolio._MEAN_RE — parse the
+# `mean=<float>` substring train_cv writes into result_summary.
+_MEAN_RE = re.compile(r"mean=([0-9.]+)")
 
 
 @dataclass
@@ -27,6 +31,8 @@ class BehaviorMetrics:
     tool_counts: dict[str, int] = field(default_factory=dict)
     error_count: int = 0
     turns_to_first_submission: int | None = None
+    turns_to_best_score: int | None = None
+    tool_call_failure_rate: float = 0.0
 
 
 def compute_metrics(workspace: Workspace) -> BehaviorMetrics:
@@ -35,6 +41,8 @@ def compute_metrics(workspace: Workspace) -> BehaviorMetrics:
     counts: Counter[str] = Counter()
     errors = 0
     first_submission_turn: int | None = None
+    best_mean: float | None = None
+    turns_to_best: int | None = None
 
     for i, rec in enumerate(records, start=1):
         kind = rec.get("kind")
@@ -46,12 +54,27 @@ def compute_metrics(workspace: Workspace) -> BehaviorMetrics:
             errors += 1
         if first_submission_turn is None and tool in _SUBMIT_TOOLS:
             first_submission_turn = i
+        if kind == "tool_call" and tool == "train_cv":
+            summary = rec.get("result_summary", "")
+            m = _MEAN_RE.search(summary)
+            if m:
+                try:
+                    mean = float(m.group(1))
+                except ValueError:
+                    mean = None
+                if mean is not None and (best_mean is None or mean > best_mean):
+                    best_mean = mean
+                    turns_to_best = i
 
+    turns_total = sum(counts.values())
+    failure_rate = errors / max(turns_total, 1)
     return BehaviorMetrics(
-        turns_per_run=sum(counts.values()),
+        turns_per_run=turns_total,
         tool_counts=dict(counts),
         error_count=errors,
         turns_to_first_submission=first_submission_turn,
+        turns_to_best_score=turns_to_best,
+        tool_call_failure_rate=failure_rate,
     )
 
 

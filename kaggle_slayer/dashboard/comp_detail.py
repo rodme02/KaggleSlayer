@@ -10,7 +10,7 @@ from typing import Any
 
 from kaggle_slayer.agent.cost_ledger import DEFAULT_LEDGER_PATH, CostLedger
 from kaggle_slayer.harness.journal import Journal
-from kaggle_slayer.harness.telemetry import calibration
+from kaggle_slayer.harness.telemetry import behavior, calibration
 from kaggle_slayer.harness.workspace import Workspace
 
 
@@ -56,6 +56,26 @@ def render(workspace_root: Path) -> None:
     cols[1].metric("Cost (USD)", f"${cost:.4f}")
     cols[2].metric("Submissions", len(cal_rows))
     cols[3].metric("Submissions on disk", len(subs))
+
+    # Behavior metrics (spec §11.2)
+    metrics = behavior.compute_metrics(workspace)
+    behav_cols = st.columns(4)
+    behav_cols[0].metric("Turns / run", metrics.turns_per_run)
+    behav_cols[1].metric(
+        "Turns to first submission",
+        metrics.turns_to_first_submission
+        if metrics.turns_to_first_submission is not None
+        else "—",
+    )
+    behav_cols[2].metric(
+        "Turns to best CV",
+        metrics.turns_to_best_score
+        if metrics.turns_to_best_score is not None
+        else "—",
+    )
+    behav_cols[3].metric(
+        "Tool-call failure rate", f"{metrics.tool_call_failure_rate:.1%}"
+    )
 
     # Timeline (table)
     st.subheader("Tool-call timeline")

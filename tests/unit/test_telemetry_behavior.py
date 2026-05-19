@@ -45,6 +45,67 @@ def test_compute_metrics_no_submission_yet(ws):
     assert metrics.turns_to_first_submission is None
 
 
+def test_compute_metrics_error_count_positive(ws):
+    """A logged tool_error bumps error_count by one."""
+    j = Journal(ws)
+    j.log_tool_call(tool="take_note", args={}, result_summary="ok")
+    j.log_tool_error(tool="train_cv", args={}, error="kaboom")
+    j.log_tool_call(tool="done", args={"summary": "x"}, result_summary="ack")
+
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.error_count == 1
+
+
+def test_compute_metrics_error_count_zero_when_only_successes(ws):
+    """Journals with no tool_error records report zero errors."""
+    j = Journal(ws)
+    j.log_tool_call(tool="take_note", args={}, result_summary="ok")
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.5")
+
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.error_count == 0
+
+
+def test_compute_metrics_turns_to_best_score_picks_first_max(ws):
+    """When several train_cv calls vary in mean, the turn index of the
+    first call that reached the running max wins."""
+    j = Journal(ws)
+    j.log_tool_call(tool="take_note", args={}, result_summary="ok")            # turn 1
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.50, std=0.01")  # turn 2
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.80, std=0.01")  # turn 3 -- best
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.70, std=0.01")  # turn 4
+
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.turns_to_best_score == 3
+
+
+def test_compute_metrics_turns_to_best_score_none_when_no_train_cv(ws):
+    j = Journal(ws)
+    j.log_tool_call(tool="take_note", args={}, result_summary="ok")
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.turns_to_best_score is None
+
+
+def test_compute_metrics_tool_call_failure_rate(ws):
+    """failure_rate = errors / total_turns, bounded [0, 1]."""
+    j = Journal(ws)
+    j.log_tool_call(tool="take_note", args={}, result_summary="ok")
+    j.log_tool_error(tool="train_cv", args={}, error="kaboom")
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.5")
+
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.turns_per_run == 3
+    assert metrics.error_count == 1
+    assert metrics.tool_call_failure_rate == pytest.approx(1 / 3)
+
+
+def test_compute_metrics_tool_call_failure_rate_zero_when_no_turns(ws):
+    """No journal => no division-by-zero, just 0.0."""
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.turns_per_run == 0
+    assert metrics.tool_call_failure_rate == 0.0
+
+
 def test_detect_stuck_loop_flags_same_call_repeated(ws):
     """Five identical (tool, args) calls in the last 10 records means stuck."""
     j = Journal(ws)
