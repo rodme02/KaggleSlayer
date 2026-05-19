@@ -1,13 +1,12 @@
 """Chaos test: scripted Solver run with 5% injected LLM failures.
 
-The Solver's retry semantics: GeminiClient has its own retry around
-TransientLLMError; the scripted client used here does NOT (it's a thin
-fake). So under chaos the Solver loop may raise the transient out.
-
-That's allowed — the success criterion is journal integrity (no corrupt
-records), not loop completion. A future Solver-side retry layer would
-let us tighten this to require completion; until then, the test asserts
-the weaker invariant.
+Verifies spec §11.3 / §13: "pipeline must survive without corrupting
+state under transient LLM errors". The chaos client (which does NOT
+have its own retry) is wrapped in :class:`RetryingLLMClient` — the
+same retry shape GeminiClient uses internally. The Solver therefore
+sees a resilient transport and the run must reach ``done``
+deterministically, with the journal still parseable. We also assert
+that failures were actually injected so a near-no-op pass is impossible.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from kaggle_slayer.agent.llm_client import (
     TransientLLMError,
     Usage,
 )
+from kaggle_slayer.agent.retrying_client import RetryingLLMClient
 from kaggle_slayer.agent.solver import Solver
 from tests.chaos.conftest import FailureInjectingLLMClient
 from tests.fixtures.synthetic_comp import make_synthetic_comp
@@ -99,33 +99,55 @@ def test_solver_survives_5_percent_chaos(tmp_path, chaos_seed):
     chaos_client = FailureInjectingLLMClient(
         inner_call=scripted, rate=0.05, seed=chaos_seed,
     )
+    # Wrap the chaos client in RetryingLLMClient so the Solver sees a resilient
+    # transport — this is the spec §11.3 / §13 invariant under test. sleep is
+    # a no-op so the test stays fast; retry_max=5 keeps us well clear of the
+    # ~25-100 failures we'd expect across the scripted call budget.
+    resilient_client = RetryingLLMClient(
+        chaos_client,
+        retry_max=5,
+        retry_base_delay_s=0.0,
+        sleep=lambda _: None,
+    )
 
     solver = Solver(
         workspace=workspace,
-        llm_client=chaos_client,
+        llm_client=resilient_client,
         target_col="Survived",
         problem_type="classification",
         metric_name="accuracy",
         max_iterations=20,
     )
 
-    try:
-        result = solver.solve()
-        assert result.status in ("done", "max_iterations")
-    except TransientLLMError:
-        # A transient bubbled up — accepted. Journal still must be parseable.
-        pass
+    result = solver.solve()
+
+    # Spec §11.3 / §13: under chaos with a retry wrapper, the run must reach
+    # done deterministically.
+    assert result.status == "done", (
+        f"expected status=done, got {result.status!r} "
+        f"(failures={chaos_client.failures}, successes={chaos_client.successes})"
+    )
 
     # The journal must be parseable line-by-line (no corruption).
-    if workspace.run_log_path.exists():
-        for line in workspace.run_log_path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            json.loads(line)  # raises if corrupted
+    assert workspace.run_log_path.exists(), "expected run_log.jsonl after a completed run"
+    for line in workspace.run_log_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        json.loads(line)  # raises if corrupted
 
-    # We expect at least SOME successes occurred (otherwise nothing happened).
-    assert chaos_client.successes >= 1
+    # We must have actually exercised the chaos path — at least one injected
+    # failure (otherwise we'd be passing on the no-chaos happy path) AND at
+    # least the 5 scripted-needed successes for the full FE/model/CV/submit/done
+    # arc to complete.
+    assert chaos_client.failures >= 1, (
+        f"no failures injected — chaos client may not be wired correctly "
+        f"(successes={chaos_client.successes})"
+    )
+    assert chaos_client.successes >= 5, (
+        f"too few successes ({chaos_client.successes}) — the scripted "
+        f"FE/model/train_cv/submit_local/done sequence didn't complete"
+    )
 
 
 def test_chaos_client_failure_rate_is_seeded(chaos_seed):
