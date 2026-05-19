@@ -10,26 +10,32 @@ KaggleSlayer drops a Gemini-driven agent into a sandboxed workspace, hands it a 
 
 Full design lives in [`docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md`](docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md). Per-week implementation plans live in [`docs/superpowers/plans/`](docs/superpowers/plans/).
 
-## Status — Week 4 of 6
+## Status — Week 5 of 6
 
-End-to-end runnable. On the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, and routing the (mocked) Kaggle push through the checkpoint gate.
+End-to-end runnable. On the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
 
 What's shipped:
 
 - ✅ **Leak-free CV contract** (`harness/cv.py`) — harness owns the splits, agent's `fit_feature_transformer` only ever sees one fold's train data
 - ✅ **Trusted harness** — metric registry (6 metrics with `higher_is_better` direction), CV-strategy registry (KFold / StratifiedKFold / TimeSeriesSplit / GroupKFold with auto-select), AST lint, resource-limited subprocess sandbox (RLIMIT_AS/CPU/NPROC/FSIZE on POSIX)
-- ✅ **Per-comp workspace + journal** — `competitions/<name>/raw/`, `agent/`, `agent/versions/`, `agent/scratch/`, `submissions/`, `run_log.jsonl`, `notes.jsonl`, `submissions/leaderboard.jsonl`
+- ✅ **Per-comp workspace + journal** — `competitions/<name>/raw/`, `agent/`, `agent/versions/`, `agent/scratch/`, `submissions/`, `run_log.jsonl`, `notes.jsonl`, `submissions/leaderboard.jsonl`, `otel.jsonl`
 - ✅ **GeminiClient** (`agent/llm_client.py`) — structured `Content`/`Part` multi-turn with `function_call`/`function_response` round-trips, automatic schema sanitization for Gemini's OpenAPI subset, retry with exponential backoff, status-code-aware transient classification
+- ✅ **RetryingLLMClient** (`agent/retrying_client.py`) — portable LLMClient adapter with TransientLLMError retry + exponential backoff (chaos-tier exercises this; GeminiClient retains its own internal retry)
 - ✅ **Solver loop + 13 tools** — `read_context`, `read_file`, `write_file`, `sample_rows`, `take_note`, `set_cv`, `train_cv`, `submit_local`, `done`, `run_python`, `set_metric`, `submit_kaggle`, `request_human_approval`
 - ✅ **Checkpoint gate** — typed `CheckpointTrigger` enum, four handler modes (interactive / auto-safe / stub / callable), journalled decisions; covers first submit, regression submit, set_metric, wall-clock budget, cost budget, memory pressure, agent-initiated
 - ✅ **Resume** — `kaggle-slayer ... --resume` rebuilds the conversation from `run_log.jsonl` and seeds the next solve
-- ✅ **CLI** — `kaggle-slayer <workspace> --target <col>` does the full thing
-- ✅ **316 unit + integration tests**, ruff + mypy strict on `harness/` and `agent/`, ~95% coverage on new code
+- ✅ **CLI** — `kaggle-slayer <workspace> --target <col>` does the full thing; unhandled exceptions land as JSON crash reports under `~/.kaggle_slayer/errors/` (with env-var redaction + 100-file rotation) and exit code 4
+- ✅ **OpenTelemetry tracing** — `<workspace>/otel.jsonl` per run, one span for the loop + one per LLM call + one per tool dispatch (`harness/telemetry/otel.py`)
+- ✅ **CV↔LB calibration tracker** — every successful `submit_kaggle` appends to `~/.kaggle_slayer/calibration.jsonl` with cv_score (of *this* submission, not best-ever), problem_type, metric, cv_strategy; lb_score backfill is Week 6
+- ✅ **MLflow logging** — one experiment per competition (`kaggleslayer/<comp>`), one run per `train_cv` call, with tags (`problem_type`, `kaggle_competition`), params (`cv_strategy`, `metric`, `fe_version`, `model_version`), metrics (`cv_mean`, `cv_std`, `fold_N`, `wall_clock_s`). Failures route to `<workspace>/mlflow_errors.log` and never crash the agent
+- ✅ **Agent behavior metrics** — `turns_per_run`, `turns_to_first_submission`, `turns_to_best_score`, `tool_call_failure_rate`, stuck-loop detector (consolidated from `resume.py`)
+- ✅ **Streamlit dashboard** — `kaggle-slayer-dashboard` console_script: portfolio page (list comps + best CV + cost + tool count) + comp-detail page (journal timeline + cost + calibration + behavior metrics + notes + submission CSV downloads). Read-only over disk
+- ✅ **Chaos tier** — `FailureInjectingLLMClient` fixture (seeded, configurable rate) + integration test asserting `result.status == "done"` deterministically under 5% transient injection
+- ✅ **375 unit + integration + chaos tests**, ruff + mypy strict on `harness/` and `agent/`, ~95% coverage on new code
 
 What's next:
 
-- ⏳ **Week 5** — telemetry surfaced (cost-ledger / OpenTelemetry / CV↔LB calibration), chaos-tier tests, redesigned Streamlit dashboard
-- ⏳ **Week 6** — three real Kaggle Playground comps, full docs (`docs/architecture.md`, ADRs, `.claude/` commands and subagents)
+- ⏳ **Week 6** — three real Kaggle Playground comps, full docs (`docs/architecture.md`, ADRs, `.claude/` commands and subagents), MLflow artifact logging (fe.py / model.py / oof_preds), LB-score backfill into the calibration log, fe_v01↔fe_v02 dashboard diff page, cross-comp dashboard page
 
 ## Why "leak-free CV" is the headline
 
@@ -48,7 +54,7 @@ This is the *temporal* version of leak-free CV. V1 used a sklearn `TransformerMi
 git clone https://github.com/rodme02/KaggleSlayer.git
 cd KaggleSlayer
 pip install -e ".[dev,dashboard]"
-pytest -m "not slow"                                # ~5s, 316 tests
+pytest -m "not slow"                                # ~5s, 375 tests
 ```
 
 To run against a real competition you need a Gemini API key (Tier 1 billing recommended — Tier 0 free tier has 0 daily quota for `gemini-2.5-pro` and only 20/day for `gemini-2.5-flash`) and Kaggle API credentials:
@@ -90,48 +96,58 @@ The agent's running history lives in `competitions/<name>/run_log.jsonl` and its
 | **Python 3.11+ + scikit-learn** | The harness wraps sklearn splitters and metrics; agent code is free to import whatever it wants subject to the AST lint and the resource-limited subprocess. |
 | **JSON-Schema for tool args** | `jsonschema.validate` runs before the handler, so a malformed call returns a typed `ToolError` the agent can self-correct on. Schemas are sanitized for Gemini's OpenAPI subset on the wire. |
 | **AST sandbox lint + RLIMIT subprocess** | Local M5 use; threat model is "agent typos itself," not adversarial. The lint catches `os.remove`, `subprocess`, `requests`, network, raw/* reads, symlinks. The subprocess sandbox caps memory, CPU, process count, and file size. |
-| **MLflow + Streamlit** (Week 5) | Per-comp run tracking + per-comp dashboard pages. |
+| **MLflow + Streamlit** | Per-comp run tracking (one experiment per comp, one run per `train_cv`) + per-comp dashboard pages (`kaggle-slayer-dashboard`). |
+| **Custom OTel JSONL exporter** | We use a thin in-tree tracer instead of `opentelemetry-sdk` — saves 1 MB+ of transitive deps; one swap to OTLP if/when we need it. |
 
 ## Repo layout
 
 ```
 kaggle_slayer/
-├─ cli.py                      # kaggle-slayer entry point
+├─ cli.py                      # kaggle-slayer entry point; run() wraps _run_inner with error capture
 ├─ harness/                    # trusted, no LLM — owns the contracts
 │   ├─ cv.py                   # train_cv leak-free contract
 │   ├─ workspace.py            # per-comp directory dataclass
 │   ├─ journal.py              # durable run_log.jsonl + notes.jsonl
-│   ├─ resume.py               # rebuild_conversation from journal
+│   ├─ resume.py               # rebuild_conversation from journal (stuck-loop delegated to telemetry.behavior)
 │   ├─ checkpoints.py          # typed gate, journalled decisions
 │   ├─ context.py              # context.md builder
 │   ├─ kaggle_client.py        # extended Kaggle API
 │   ├─ sandbox.py              # AST lint + run_subprocess
-│   └─ registry/               # metrics + CV strategies
-└─ agent/                      # LLM side
-    ├─ solver.py               # reason-act loop
-    ├─ llm_client.py           # GeminiClient + LLMClient Protocol
-    ├─ tools.py                # Tool / ToolRegistry / ToolError
-    ├─ cost_ledger.py          # per-call USD ledger
-    ├─ handlers/               # files.py + ml.py + python.py
-    └─ prompts/system.md       # Solver system prompt
+│   ├─ registry/               # metrics + CV strategies
+│   └─ telemetry/              # OTel tracer, calibration, error capture, behavior metrics, MLflow logger
+├─ agent/                      # LLM side
+│   ├─ solver.py               # reason-act loop + SolverContext (best/last cv) + OTel spans
+│   ├─ llm_client.py           # GeminiClient + LLMClient Protocol + TransientLLMError
+│   ├─ retrying_client.py      # LLMClient adapter for portable transient retry
+│   ├─ tools.py                # Tool / ToolRegistry / ToolError
+│   ├─ cost_ledger.py          # per-call USD ledger
+│   ├─ handlers/               # files.py + ml.py (incl. MLflow + calibration hooks) + python.py
+│   └─ prompts/system.md       # Solver system prompt
+└─ dashboard/                  # Streamlit, read-only over disk
+    ├─ app.py                  # kaggle-slayer-dashboard entry; routes Portfolio / Competition detail
+    ├─ portfolio.py            # list comps + best CV + cost + tool count
+    └─ comp_detail.py          # timeline + cost + calibration + notes + submissions + behavior metrics
 
-tests/{unit,integration,fixtures}/
+tests/{unit,integration,chaos,fixtures}/
 docs/superpowers/{specs,plans}/
 scripts/preflight.py            # verify Gemini + Kaggle creds
 ```
 
 ## Status of testing
 
-- **Unit tier** — `pytest -m "not slow"`. ~316 tests. Runs on every push. Linux 3.11 + 3.12 matrix in CI.
+- **Unit tier** — `pytest -m "not slow"`. ~375 tests. Runs on every push. Linux 3.11 + 3.12 matrix in CI.
 - **Integration tier** — fake-LLM-driven scripted runs against a synthetic micro-comp (`tests/fixtures/synthetic_comp.py`). Also runs in CI under `-m integration` (selected automatically by file location).
-- **Slow tier (opt-in)** — real Gemini calls. `pytest -m slow`. 8 tests; ~$0.001–0.05 per run; skipped automatically when `GEMINI_API_KEY` is missing. Not part of CI.
+- **Chaos tier** — `pytest -m chaos`. Scripted Solver run wrapped in `FailureInjectingLLMClient` (5% transient injection, seeded) + `RetryingLLMClient` adapter. Verifies spec §11.3 / §13: the pipeline reaches `done` deterministically and the journal stays parseable. Runs in CI under the default `-m "not slow"` invocation.
+- **Slow tier (opt-in)** — real Gemini calls. `pytest -m slow`. 8 tests; ~$0.005–0.02 per run; skipped automatically when `GEMINI_API_KEY` is missing. Not part of CI.
 
 ## Honest limitations
 
 - Phase-1 scope is tabular only — binary, multi-class, regression, time-series tabular. NLP / CV / audio are deferred to later phases.
 - The sandbox is "best effort." Threat model is non-adversarial: AST lint catches typos; subprocess rlimits cap memory/CPU. Truly adversarial code or an untrusted LLM provider would need Docker/gVisor.
 - macOS rejects `RLIMIT_AS` with "current limit exceeds maximum limit" — the cap is best-effort on Darwin, hard on Linux. CPU cap is enforced on both (with a 2s buffer above the wall-clock timeout).
-- CV↔leaderboard correlation tracking lands in Week 5. Until then, treat CV-on-real-comps with some skepticism.
+- CV↔leaderboard tracker writes the *CV side* on every successful `submit_kaggle`; the *LB side* (`lb_score`) is left null pending Week-6's Kaggle-leaderboard backfill. Treat early calibration history as one-sided until then.
+- MLflow tracking defaults to a file store at `~/.kaggle_slayer/mlruns` (overridable via `MLFLOW_TRACKING_URI`). Artifact logging (fe.py / model.py / oof_preds.npy) is Week-6 scope; only params + metrics + tags land today.
+- The OTel exporter is a custom JSONL writer (single-process, single-threaded). Concurrent writers against the same workspace would interleave records; the Solver is serial by design, so this is fine in practice.
 - No Phase-2/3 features (multi-agent, cloud-burst, NLP track) are wired in.
 
 ## License
