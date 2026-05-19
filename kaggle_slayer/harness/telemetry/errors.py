@@ -6,8 +6,9 @@ traceback, the last N tool calls (for context), and a redacted snapshot
 of the environment. Rotation: keep the last 100 reports.
 
 Redaction rule: any env key whose UPPERCASE name contains KEY, TOKEN,
-SECRET, or PASSWORD has its value replaced with "<redacted>". This is
-a coarse filter — the dev should still review reports before sharing.
+SECRET, PASSWORD, PASSWD, AUTH, BEARER, COOKIE, CREDENTIAL, PAT, or
+PRIVATE has its value replaced with "<redacted>". This is a coarse
+filter — the dev should still review reports before sharing.
 
 The module is single-process / single-threaded; concurrent capture
 calls might interleave the file list during rotation but never lose
@@ -26,11 +27,20 @@ from typing import Any
 
 DEFAULT_DIR = Path.home() / ".kaggle_slayer" / "errors"
 _MAX_FILES = 100
-_REDACT_RE = re.compile(r"(KEY|TOKEN|SECRET|PASSWORD)")
+# Most patterns are broad substring matches. PAT is special: as a bare
+# substring it would catch PATH, PATTERN, PATCH, etc. — so we require it
+# to sit at a token boundary (start/end of string or adjacent to `_`).
+_REDACT_RE = re.compile(
+    r"(KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTH|BEARER|COOKIE|CREDENTIAL|PRIVATE)"
+    r"|(?:^|_)PAT(?:_|$)"
+)
 
 
 def _now_filename(exc: BaseException) -> str:
-    stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%d_%H%M%S")
+    # Microsecond resolution prevents filename collisions when two crashes
+    # occur in the same UTC second (e.g., a cascade); without %f the second
+    # write would silently overwrite the first.
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%d_%H%M%S_%f")
     safe_type = type(exc).__name__.replace(".", "_")
     return f"{stamp}_{safe_type}.json"
 

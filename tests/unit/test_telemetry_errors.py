@@ -70,3 +70,40 @@ def test_capture_redacts_secrets_from_env(isolated_errors):
     assert rec["env"]["MY_SECRET"] == "<redacted>"
     assert rec["env"]["DB_PASSWORD"] == "<redacted>"
     assert rec["env"]["PATH"] == "/usr/bin"
+
+
+def test_capture_redacts_broader_secret_patterns(isolated_errors):
+    """Redaction also covers AUTH/BEARER/COOKIE/CREDENTIAL/PAT/PRIVATE/PASSWD patterns."""
+    try:
+        raise ValueError("x")
+    except ValueError as e:
+        path = errors.capture(e, recent_calls=[], env={
+            "AUTHORIZATION": "Bearer abc",
+            "MY_BEARER_TOKEN": "tok",
+            "SESSION_COOKIE": "sid=123",
+            "GH_PAT": "ghp_xxx",
+            "MY_CREDENTIAL": "creds",
+            "PRIVATE_KEY": "-----BEGIN-----",
+            "DB_PASSWD": "p4ss",
+            "HOME": "/home/user",
+        })
+    rec = json.loads(path.read_text())
+    assert rec["env"]["AUTHORIZATION"] == "<redacted>"
+    assert rec["env"]["MY_BEARER_TOKEN"] == "<redacted>"
+    assert rec["env"]["SESSION_COOKIE"] == "<redacted>"
+    assert rec["env"]["GH_PAT"] == "<redacted>"
+    assert rec["env"]["MY_CREDENTIAL"] == "<redacted>"
+    assert rec["env"]["PRIVATE_KEY"] == "<redacted>"
+    assert rec["env"]["DB_PASSWD"] == "<redacted>"
+    assert rec["env"]["HOME"] == "/home/user"
+
+
+def test_capture_distinct_filenames_in_same_second(isolated_errors):
+    """Two captures in the same UTC second must produce distinct filenames."""
+    paths = []
+    for _ in range(5):
+        try:
+            raise ValueError("x")
+        except ValueError as e:
+            paths.append(errors.capture(e, recent_calls=[], env={}))
+    assert len({p.name for p in paths}) == len(paths)
