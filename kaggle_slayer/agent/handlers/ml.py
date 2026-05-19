@@ -150,6 +150,11 @@ def train_cv(ctx: Any) -> str:
         is_better = prior is None or result.mean < prior
     if is_better:
         ctx.best_cv_mean = float(result.mean)
+    # Track the most recent train_cv result independently of best_cv_mean.
+    # F16: the calibration row should reflect THIS submission's CV, not the
+    # best-ever CV. submit_kaggle reads ctx.last_cv_mean for its calibration
+    # hook; the regression gate continues to use ctx.best_cv_mean.
+    ctx.last_cv_mean = float(result.mean)
     return summary
 
 
@@ -350,9 +355,13 @@ def submit_kaggle(ctx: Any, *, csv_path: str, message: str) -> str:
     cv_strategy_name = getattr(ctx, "cv_kind", None) or (
         "stratified_kfold" if ctx.problem_type == "classification" else "kfold"
     )
+    # F16: use last_cv_mean (the CV of *this* submission) rather than
+    # best_cv_mean (the running max). The two diverge whenever the agent
+    # submits a worse-but-still-approved model after a stronger one.
+    last_cv = getattr(ctx, "last_cv_mean", None)
     calibration.record(
         competition=ctx.competition,
-        cv_score=float(ctx.best_cv_mean) if ctx.best_cv_mean is not None else float("nan"),
+        cv_score=float(last_cv) if last_cv is not None else float("nan"),
         lb_score=None,
         problem_type=ctx.problem_type,
         metric=ctx.metric_name,

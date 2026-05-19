@@ -80,8 +80,15 @@ def test_tracer_records_exception_status(ws):
 
 
 def test_set_attribute_after_span_exit_does_not_mutate_written_record(ws):
-    """The record is sealed at write time; later mutations on the Span
-    object must not change what was already appended to the JSONL file."""
+    """The JSONL record is sealed on exit; in-memory mutation has no
+    observable effect.
+
+    Concretely: the Span dataclass itself stays mutable after `__exit__`
+    runs (we don't enforce `_sealed = True`), but the record has already
+    been serialized to disk by then. Any later `set_attribute` call on the
+    same Span instance updates only the live object — the appended JSONL
+    line is unchanged.
+    """
     tracer = otel.make_tracer(ws, run_name="solve")
     with tracer.start_span("sealed", attributes={"early": "yes"}) as span:
         pass

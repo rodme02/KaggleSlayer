@@ -57,6 +57,7 @@ class SolverContext:
     final_summary: str = ""
     checkpoint_handler: CheckpointHandler | None = None
     best_cv_mean: float | None = None
+    last_cv_mean: float | None = None
     kaggle_client: KaggleClient | None = None
     competition: str = ""
 

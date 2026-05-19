@@ -252,6 +252,7 @@ def test_submit_kaggle_appends_calibration_row(tmp_path, monkeypatch):
 
     ctx = _make_ctx(tmp_path, stub_decision=cp.Decision.APPROVE)
     ctx.best_cv_mean = 0.82
+    ctx.last_cv_mean = 0.82
     ml_h.submit_kaggle(
         ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="baseline"
     )

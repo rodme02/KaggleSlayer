@@ -575,6 +575,7 @@ def test_solver_writes_otel_trace_to_workspace(tmp_path):
     span_names = [s["name"] for s in spans]
     # Root marker for the run, plus LLM-call spans, plus tool-dispatch spans
     assert any(n.startswith("run:") for n in span_names)
+    assert "solve.loop" in span_names, f"expected solve.loop span; got {span_names}"
     assert any(n == "llm.call" for n in span_names)
     assert any(n.startswith("tool:") for n in span_names)
     # The tool-dispatch span carries the tool name as an attribute

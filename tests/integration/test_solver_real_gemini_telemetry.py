@@ -56,7 +56,7 @@ def test_real_gemini_writes_all_telemetry_artifacts(tmp_path, gemini_key, monkey
     llm = GeminiClient(
         api_key=gemini_key,
         ledger=ledger,
-        competition="synthetic-telemetry",
+        competition=workspace.name,
         default_model="gemini-2.5-flash",
         retry_max=4,
         retry_base_delay_s=20.0,
@@ -109,10 +109,10 @@ def test_real_gemini_writes_all_telemetry_artifacts(tmp_path, gemini_key, monkey
     assert any(n == "llm.call" for n in span_names), f"no llm.call span; names={span_names}"
     assert any(n.startswith("tool:") for n in span_names), f"no tool span; names={span_names}"
 
-    assert ledger.total_for(competition="synthetic-telemetry") > 0, "cost ledger has no rows"
+    assert ledger.total_for(competition=workspace.name) > 0, "cost ledger has no rows"
 
     if fake_kaggle.submit.called:
-        rows = calibration.read_history(competition="synthetic-telemetry", path=cal_path)
+        rows = calibration.read_history(competition=workspace.name, path=cal_path)
         assert len(rows) >= 1, "submit_kaggle was called but no calibration row appended"
         assert rows[0]["metric"] == "accuracy"
         assert rows[0]["cv_score"] is not None
@@ -120,6 +120,6 @@ def test_real_gemini_writes_all_telemetry_artifacts(tmp_path, gemini_key, monkey
 
     print(
         f"\nDONE iter={result.iterations} "
-        f"cost=${ledger.total_for(competition='synthetic-telemetry'):.4f} "
+        f"cost=${ledger.total_for(competition=workspace.name):.4f} "
         f"otel_spans={len(spans)} kaggle_submit_called={fake_kaggle.submit.called}"
     )

@@ -42,6 +42,9 @@ def render(workspace_root: Path) -> None:
     """Streamlit page: per-comp detail."""
     import streamlit as st  # type: ignore[import-untyped]
 
+    if not workspace_root.is_dir():
+        st.error(f"path does not exist: `{workspace_root}`")
+        return
     workspace = Workspace(root=workspace_root)
     st.title(f"Competition · `{workspace.name}`")
 

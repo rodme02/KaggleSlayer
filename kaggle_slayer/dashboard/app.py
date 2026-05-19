@@ -9,23 +9,22 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import streamlit as st  # type: ignore[import-untyped]
-
 
 def _in_streamlit_runtime() -> bool:
     """True iff this module is being executed inside a running Streamlit script.
 
-    We can't just check `"streamlit.runtime.scriptrunner" in sys.modules`,
-    because importing streamlit alone loads that submodule. Instead, ask
-    streamlit whether the current thread has an active ScriptRunContext.
+    Uses the public `st.runtime.exists()` API (streamlit 1.18+) instead of
+    poking at the internal `scriptrunner_utils.script_run_context` module
+    path, which has moved between streamlit versions. The except-fallback
+    is retained as a safety net in case `runtime` is missing entirely on
+    very old releases.
     """
     try:
-        from streamlit.runtime.scriptrunner_utils.script_run_context import (  # type: ignore[import-untyped]
-            get_script_run_ctx,
-        )
-    except ImportError:  # older/newer streamlit layouts
+        import streamlit as st  # type: ignore[import-untyped]  # noqa: PLC0415
+
+        return bool(st.runtime.exists())
+    except (ImportError, AttributeError):
         return False
-    return get_script_run_ctx() is not None
 
 
 def main() -> None:
@@ -41,6 +40,8 @@ def main() -> None:
 
 def _run_pages() -> None:
     # Lazy imports so the module can be imported without streamlit page state.
+    import streamlit as st  # type: ignore[import-untyped]  # noqa: PLC0415
+
     from kaggle_slayer.dashboard import comp_detail, portfolio
 
     st.set_page_config(page_title="KaggleSlayer", layout="wide")
