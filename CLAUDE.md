@@ -6,9 +6,9 @@ Guidance for Claude Code when working in this repo.
 
 KaggleSlayer V2 — an LLM-agent harness for tabular Kaggle competitions. A Gemini-driven Solver reads the competition, plans a strategy, writes feature-engineering and model code, and the trusted Python harness runs leak-free cross-validation, journals every tool call, gates submissions through a checkpoint, and ships a CSV.
 
-Full design in `docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md`. Per-week plans in `docs/superpowers/plans/`. The legacy V1 AutoML pipeline was archived and removed; only the leak-free-CV idea was carried forward.
+Full design in `docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md`. Per-week plans in `docs/superpowers/plans/`. The legacy V1 AutoML pipeline was archived and removed; only the leak-free-CV idea was carried forward. **Scope, status, and the post-v1 roadmap live in one place: `GOALS.md` — read it before deciding what is in or out of scope.**
 
-**Current state:** Weeks 1–5 of 6 shipped. The harness is end-to-end runnable — `kaggle-slayer <workspace> --target <col>` invokes Gemini, the agent writes `agent/fe.py`/`agent/model.py`, calls `train_cv` and `submit_local`, and (gated) `submit_kaggle`. Every run also emits an OpenTelemetry trace to `<workspace>/otel.jsonl`, logs one MLflow run per `train_cv`, appends a row to `~/.kaggle_slayer/calibration.jsonl` on each successful `submit_kaggle`, and captures unhandled exceptions as JSON crash reports under `~/.kaggle_slayer/errors/`. Real-Gemini acceptance gate is green on gemini-2.5-flash (~$0.005–0.02 per synthetic-comp solve). 375 non-slow tests, 8 slow-tier (opt-in).
+**Current state:** the harness is end-to-end runnable — `kaggle-slayer <workspace> --target <col>` invokes Gemini, the agent writes `agent/fe.py`/`agent/model.py`, calls `train_cv` and `submit_local`, and (gated) `submit_kaggle`. Every run also emits an OpenTelemetry trace to `<workspace>/otel.jsonl`, logs one MLflow run per `train_cv`, appends a row to `~/.kaggle_slayer/calibration.jsonl` on each successful `submit_kaggle`, and captures unhandled exceptions as JSON crash reports under `~/.kaggle_slayer/errors/`. Real-Gemini acceptance gate is green on gemini-2.5-flash (~$0.005–0.02 per synthetic-comp solve). 375 non-slow tests pass with no API keys; 8 slow-tier (opt-in, real Gemini). The headline v1 goal is a credential-free demo (no-key fake-LLM + synthetic-comp path) — not wired yet; see `GOALS.md`.
 
 ## Hard rules
 
@@ -72,7 +72,8 @@ pip install -e ".[dev,dashboard]"
 pytest -m "not slow"                                       # ~5s, 375 tests
 pytest --cov=kaggle_slayer/harness --cov=kaggle_slayer/agent -m "not slow"
 ruff check kaggle_slayer tests
-mypy kaggle_slayer/harness kaggle_slayer/agent             # strict on both
+mypy kaggle_slayer/harness                                 # what CI runs (harness only)
+mypy kaggle_slayer/harness kaggle_slayer/agent            # local: strict on both, also clean
 kaggle-slayer competitions/<name> --target <col> --metric <m>  # full solve
 kaggle-slayer-dashboard                                    # Streamlit portfolio + comp-detail
 pytest -m slow                                             # opt-in real-Gemini ($)
@@ -87,7 +88,8 @@ CLI flags worth knowing:
 
 ## Conventions
 
-- Mypy strict on `kaggle_slayer/harness` AND `kaggle_slayer/agent`. Tests aren't type-checked.
+- Mypy is strict on both `kaggle_slayer/harness` and `kaggle_slayer/agent` and both stay clean, but **CI type-checks the harness only** (`mypy kaggle_slayer/harness` in `.github/workflows/ci.yml`). Keep `agent/` clean locally too, but don't claim CI enforces it. Tests aren't type-checked.
+- **Secret hygiene:** never `git add -f .env` (or any real-key file). `.env` is gitignored and must stay out of every commit; commit `.env.example` instead. If a key is ever exposed, rotate it provider-side (Google AI Studio / Kaggle) — scrubbing a file does not revoke a key.
 - TDD: write the failing test first, then the implementation. Commits demonstrate the pattern week by week.
 - Errors at boundaries raise typed exceptions: `CVError`, `ToolError`, `ResumeError`, `TransientLLMError`.
 - CLI output uses `rich`. Library code uses stdlib `logging`. No `print` in library code.
@@ -97,7 +99,7 @@ CLI flags worth knowing:
 
 ## What's coming (do not pre-build)
 
-- **Week 6** — three live Kaggle Playground comps + docs (`docs/architecture.md`, `docs/adr/*.md`, `.claude/commands/*.md`, `.claude/agents/harness-reviewer.md`), MLflow artifact logging (fe.py / model.py / oof_preds.npy), LB-score backfill into the calibration log, the fe_v01↔fe_v02 dashboard diff page, and the cross-comp dashboard page.
+The post-v1 roadmap is the single source of truth in `GOALS.md` — do not pre-build anything listed there. In short: the credential-free demo (the headline v1 goal), then live Kaggle Playground comps + docs (`docs/architecture.md`, `docs/adr/*.md`, `.claude/commands/*.md`, `.claude/agents/harness-reviewer.md`), MLflow artifact logging (fe.py / model.py / oof_preds.npy), LB-score backfill into the calibration log, the fe_v01↔fe_v02 dashboard diff page, and the cross-comp dashboard page.
 
 ## Files that pin the architecture (read these before touching the load-bearing parts)
 

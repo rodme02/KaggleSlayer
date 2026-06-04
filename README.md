@@ -8,11 +8,22 @@
 
 KaggleSlayer drops a Gemini-driven agent into a sandboxed workspace, hands it a competition brief, and lets it iterate on `fe.py` and `model.py` until it's ready to submit. The harness — the parts that cannot be left to LLM judgment — owns leak-free cross-validation, the tool surface, the checkpoint gate on Kaggle submissions, and the journal that makes any run resumable after a crash or abort.
 
-Full design lives in [`docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md`](docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md). Per-week implementation plans live in [`docs/superpowers/plans/`](docs/superpowers/plans/).
+<!--
+Hero media is pending capture (a terminal solve and/or the Streamlit dashboard).
+See docs/media/README.md — drop the file in at docs/media/hero.gif and uncomment the
+line below and it renders with no further edits.
+-->
+<!-- ![KaggleSlayer in action](docs/media/hero.gif) -->
 
-## Status — Week 5 of 6
+> **Hero media:** pending — see [`docs/media/README.md`](docs/media/README.md).
 
-End-to-end runnable. On the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
+Full design lives in [`docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md`](docs/superpowers/specs/2026-05-14-llm-agent-harness-design.md). Per-week implementation plans live in [`docs/superpowers/plans/`](docs/superpowers/plans/). Scope, status, and roadmap live in one place: [`GOALS.md`](GOALS.md).
+
+## Status
+
+End-to-end runnable. A clean clone runs the full test suite — **375 tests, ~5s, no API keys** — which is exactly what CI enforces (Linux 3.11 + 3.12). A *real* solve needs a Gemini API key plus Kaggle credentials; on the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
+
+> **Headline v1 goal:** a credential-free demo so a clean clone runs the agent loop end-to-end with **no keys** (fake-LLM + synthetic-comp path). This is **not wired yet** — until it is, a real solve requires Gemini. See [`GOALS.md`](GOALS.md) for the full v1 scope boundary.
 
 What's shipped:
 
@@ -31,11 +42,12 @@ What's shipped:
 - ✅ **Agent behavior metrics** — `turns_per_run`, `turns_to_first_submission`, `turns_to_best_score`, `tool_call_failure_rate`, stuck-loop detector (consolidated from `resume.py`)
 - ✅ **Streamlit dashboard** — `kaggle-slayer-dashboard` console_script: portfolio page (list comps + best CV + cost + tool count) + comp-detail page (journal timeline + cost + calibration + behavior metrics + notes + submission CSV downloads). Read-only over disk
 - ✅ **Chaos tier** — `FailureInjectingLLMClient` fixture (seeded, configurable rate) + integration test asserting `result.status == "done"` deterministically under 5% transient injection
-- ✅ **375 unit + integration + chaos tests**, ruff + mypy strict on `harness/` and `agent/`, ~95% coverage on new code
+- ✅ **375 unit + integration + chaos tests** (pass with no keys). ruff clean; mypy strict on `harness/` locally and `agent/` too. **CI type-checks the harness only** (`mypy kaggle_slayer/harness`) — see [`CLAUDE.md`](CLAUDE.md). ~95% coverage on new code.
 
-What's next:
+What's next (deferred to the post-v1 roadmap — see [`GOALS.md`](GOALS.md)):
 
-- ⏳ **Week 6** — three real Kaggle Playground comps, full docs (`docs/architecture.md`, ADRs, `.claude/` commands and subagents), MLflow artifact logging (fe.py / model.py / oof_preds), LB-score backfill into the calibration log, fe_v01↔fe_v02 dashboard diff page, cross-comp dashboard page
+- The **credential-free demo** (the headline v1 goal): expose `tests/fixtures/synthetic_comp.py` + a fake-LLM path so a clean clone solves a comp with no keys.
+- Live leaderboard / benchmark across real Kaggle Playground comps, full docs (`docs/architecture.md`, ADRs, `.claude/` commands and subagents), MLflow artifact logging (fe.py / model.py / oof_preds), LB-score backfill into the calibration log, the fe_v01↔fe_v02 dashboard diff page, and the cross-comp dashboard page.
 
 ## Why "leak-free CV" is the headline
 
@@ -50,25 +62,26 @@ This is the *temporal* version of leak-free CV. V1 used a sklearn `TransformerMi
 
 ## Quickstart
 
+No API keys are needed to clone, install, and run the full test suite:
+
 ```bash
 git clone https://github.com/rodme02/KaggleSlayer.git
 cd KaggleSlayer
 pip install -e ".[dev,dashboard]"
-pytest -m "not slow"                                # ~5s, 375 tests
+pytest -m "not slow"                                # ~5s, 375 tests, no keys
 ```
 
-To run against a real competition you need a Gemini API key (Tier 1 billing recommended — Tier 0 free tier has 0 daily quota for `gemini-2.5-pro` and only 20/day for `gemini-2.5-flash`) and Kaggle API credentials:
+To run against a real competition you need a Gemini API key (Tier 1 billing recommended — Tier 0 free tier has 0 daily quota for `gemini-2.5-pro` and only 20/day for `gemini-2.5-flash`) and Kaggle API credentials. Copy [`.env.example`](.env.example) to `.env` and fill it in:
 
 ```bash
-# .env at the repo root
-GEMINI_API_KEY=...
-KAGGLE_API_TOKEN=KGAT_...          # or the legacy KAGGLE_USERNAME + KAGGLE_KEY
-
+cp .env.example .env               # then fill in GEMINI_API_KEY + KAGGLE_API_TOKEN
 python scripts/preflight.py        # verifies both credentials work
 
 # competitions/<name>/raw/ should contain Kaggle's train.csv + test.csv
 kaggle-slayer competitions/titanic --target Survived --metric accuracy
 ```
+
+> Per-competition workspaces under `competitions/` are gitignored — a clean clone starts empty and you point the CLI at one you set up. A **no-key demo** that skips this setup entirely is the headline v1 goal (see [`GOALS.md`](GOALS.md)); it is not wired yet.
 
 Useful flags:
 
@@ -135,7 +148,7 @@ scripts/preflight.py            # verify Gemini + Kaggle creds
 
 ## Status of testing
 
-- **Unit tier** — `pytest -m "not slow"`. ~375 tests. Runs on every push. Linux 3.11 + 3.12 matrix in CI.
+- **Unit tier** — `pytest -m "not slow"`. 375 tests (1 environment-gated skip). Runs on every push. Linux 3.11 + 3.12 matrix in CI.
 - **Integration tier** — fake-LLM-driven scripted runs against a synthetic micro-comp (`tests/fixtures/synthetic_comp.py`). Also runs in CI under `-m integration` (selected automatically by file location).
 - **Chaos tier** — `pytest -m chaos`. Scripted Solver run wrapped in `FailureInjectingLLMClient` (5% transient injection, seeded) + `RetryingLLMClient` adapter. Verifies spec §11.3 / §13: the pipeline reaches `done` deterministically and the journal stays parseable. Runs in CI under the default `-m "not slow"` invocation.
 - **Slow tier (opt-in)** — real Gemini calls. `pytest -m slow`. 8 tests; ~$0.005–0.02 per run; skipped automatically when `GEMINI_API_KEY` is missing. Not part of CI.
@@ -145,8 +158,8 @@ scripts/preflight.py            # verify Gemini + Kaggle creds
 - Phase-1 scope is tabular only — binary, multi-class, regression, time-series tabular. NLP / CV / audio are deferred to later phases.
 - The sandbox is "best effort." Threat model is non-adversarial: AST lint catches typos; subprocess rlimits cap memory/CPU. Truly adversarial code or an untrusted LLM provider would need Docker/gVisor.
 - macOS rejects `RLIMIT_AS` with "current limit exceeds maximum limit" — the cap is best-effort on Darwin, hard on Linux. CPU cap is enforced on both (with a 2s buffer above the wall-clock timeout).
-- CV↔leaderboard tracker writes the *CV side* on every successful `submit_kaggle`; the *LB side* (`lb_score`) is left null pending Week-6's Kaggle-leaderboard backfill. Treat early calibration history as one-sided until then.
-- MLflow tracking defaults to a file store at `~/.kaggle_slayer/mlruns` (overridable via `MLFLOW_TRACKING_URI`). Artifact logging (fe.py / model.py / oof_preds.npy) is Week-6 scope; only params + metrics + tags land today.
+- CV↔leaderboard tracker writes the *CV side* on every successful `submit_kaggle`; the *LB side* (`lb_score`) is left null pending the post-v1 Kaggle-leaderboard backfill (see [`GOALS.md`](GOALS.md)). Treat early calibration history as one-sided until then.
+- MLflow tracking defaults to a file store at `~/.kaggle_slayer/mlruns` (overridable via `MLFLOW_TRACKING_URI`). Artifact logging (fe.py / model.py / oof_preds.npy) is post-v1 roadmap (see [`GOALS.md`](GOALS.md)); only params + metrics + tags land today.
 - The OTel exporter is a custom JSONL writer (single-process, single-threaded). Concurrent writers against the same workspace would interleave records; the Solver is serial by design, so this is fine in practice.
 - No Phase-2/3 features (multi-agent, cloud-burst, NLP track) are wired in.
 
