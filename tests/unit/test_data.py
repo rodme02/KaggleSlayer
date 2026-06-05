@@ -88,6 +88,7 @@ def test_disabled_never_calls_client(tmp_path):
 
     client.download.assert_not_called()
     assert result.downloaded is False
+    assert result.files == []
 
 
 def test_client_failure_raises_download_error(tmp_path):
@@ -100,3 +101,41 @@ def test_client_failure_raises_download_error(tmp_path):
 
     assert ex.value.slug == "titanic"
     assert "403" in str(ex.value.cause)
+
+
+def test_corrupt_zip_raises_download_error(tmp_path):
+    ws = _make_workspace(tmp_path)
+
+    def fake_download(name, *, dest):
+        # Write a file with a .zip name that is not a valid zip archive.
+        (Path(dest) / f"{name}.zip").write_bytes(b"not a real zip")
+        return Path(dest)
+
+    client = MagicMock()
+    client.download.side_effect = fake_download
+
+    with pytest.raises(DownloadError) as ex:
+        ensure_competition_data(ws, client, slug="titanic")
+
+    assert ex.value.slug == "titanic"
+
+
+def test_finds_csvs_in_extracted_subdirectory(tmp_path):
+    ws = _make_workspace(tmp_path)
+
+    def fake_download(name, *, dest):
+        # Some competitions nest their CSVs under a subdirectory in the zip.
+        _write_zip(
+            Path(dest) / f"{name}.zip",
+            **{f"{name}/train.csv": pd.DataFrame({"x": [1], "y": [0]})},
+        )
+        return Path(dest)
+
+    client = MagicMock()
+    client.download.side_effect = fake_download
+
+    result = ensure_competition_data(ws, client, slug="housing")
+
+    assert result.downloaded is True
+    assert result.files == ["train.csv"]
+    assert (ws.raw_dir / "housing" / "train.csv").exists()

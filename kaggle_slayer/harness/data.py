@@ -47,7 +47,7 @@ class DownloadError(Exception):
 
 
 def _existing_csvs(raw_dir: Path) -> list[str]:
-    return sorted(p.name for p in raw_dir.glob("*.csv"))
+    return sorted(p.name for p in raw_dir.rglob("*.csv"))
 
 
 def _extract_zips(raw_dir: Path) -> None:
@@ -84,6 +84,9 @@ def ensure_competition_data(
     except Exception as e:  # noqa: BLE001 — wrap any client/auth/network failure
         raise DownloadError(slug, e) from e
 
-    _extract_zips(raw_dir)
+    try:
+        _extract_zips(raw_dir)
+    except Exception as e:  # noqa: BLE001 — a corrupt archive is a failed download
+        raise DownloadError(slug, e) from e
 
     return DownloadResult(slug=slug, downloaded=True, files=_existing_csvs(raw_dir))
