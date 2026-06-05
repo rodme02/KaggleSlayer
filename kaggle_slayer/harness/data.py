@@ -47,7 +47,10 @@ class DownloadError(Exception):
 
 
 def _existing_csvs(raw_dir: Path) -> list[str]:
-    return sorted(p.name for p in raw_dir.rglob("*.csv"))
+    # Top-level only: every consumer (context.py, handlers/ml.py) reads
+    # raw/<name>.csv at the top of raw/, so a CSV nested in a subdirectory
+    # is not usable data and must not satisfy the skip-guard.
+    return sorted(p.name for p in raw_dir.glob("*.csv"))
 
 
 def _extract_zips(raw_dir: Path) -> None:

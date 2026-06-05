@@ -120,11 +120,17 @@ def test_corrupt_zip_raises_download_error(tmp_path):
     assert ex.value.slug == "titanic"
 
 
-def test_finds_csvs_in_extracted_subdirectory(tmp_path):
+def test_nested_csv_not_reported_as_top_level(tmp_path):
+    """A CSV that extracts into a subdirectory is not usable top-level data.
+
+    Downstream consumers (context.py, handlers/ml.py) read raw/train.csv at
+    the top level, so _existing_csvs counts only top-level CSVs. A nested
+    layout extracts but yields no usable files — a known, out-of-scope gap
+    we pin here so it isn't silently "fixed" into a false success.
+    """
     ws = _make_workspace(tmp_path)
 
     def fake_download(name, *, dest):
-        # Some competitions nest their CSVs under a subdirectory in the zip.
         _write_zip(
             Path(dest) / f"{name}.zip",
             **{f"{name}/train.csv": pd.DataFrame({"x": [1], "y": [0]})},
@@ -136,6 +142,8 @@ def test_finds_csvs_in_extracted_subdirectory(tmp_path):
 
     result = ensure_competition_data(ws, client, slug="housing")
 
-    assert result.downloaded is True
-    assert result.files == ["train.csv"]
+    # The archive was extracted to the subdirectory...
     assert (ws.raw_dir / "housing" / "train.csv").exists()
+    # ...but a nested CSV is not counted as usable top-level data.
+    assert result.downloaded is True
+    assert result.files == []
