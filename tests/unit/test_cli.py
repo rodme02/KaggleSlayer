@@ -355,3 +355,27 @@ def test_cli_download_failure_exits_2(tmp_path):
         exit_code = cli.run([str(comp_path), "--target", "y"])
 
     assert exit_code == 2
+
+
+def test_download_error_message_403_mentions_rules():
+    msg = cli._download_error_message(
+        cli.DownloadError("titanic", RuntimeError("403 Client Error: Forbidden"))
+    )
+    assert "https://www.kaggle.com/c/titanic/rules" in msg
+    assert "--no-download" in msg
+
+
+def test_download_error_message_credentials_mentions_token():
+    msg = cli._download_error_message(
+        cli.DownloadError("titanic", RuntimeError("Could not find kaggle.json"))
+    )
+    assert "KAGGLE_API_TOKEN" in msg
+    assert "--no-download" in msg
+
+
+def test_download_error_message_generic_includes_cause():
+    msg = cli._download_error_message(
+        cli.DownloadError("titanic", RuntimeError("network unreachable"))
+    )
+    assert "network unreachable" in msg
+    assert "--no-download" in msg
