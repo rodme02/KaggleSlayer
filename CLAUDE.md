@@ -31,6 +31,7 @@ kaggle_slayer/
 │   ├─ resume.py                   # rebuild_conversation from run_log (delegates stuck-loop to telemetry.behavior)
 │   ├─ checkpoints.py              # typed gate, four modes, journalled decisions
 │   ├─ context.py                  # context.md builder
+│   ├─ data.py                     # ensure_competition_data — auto-fetch + unzip into raw/
 │   ├─ kaggle_client.py            # KaggleClient wrapper (view/list/download/submit)
 │   ├─ sandbox.py                  # AST lint + run_subprocess (RLIMIT_AS/CPU/NPROC/FSIZE)
 │   ├─ registry/

@@ -77,7 +77,8 @@ To run against a real competition you need a Gemini API key (Tier 1 billing reco
 cp .env.example .env               # then fill in GEMINI_API_KEY + KAGGLE_API_TOKEN
 python scripts/preflight.py        # verifies both credentials work
 
-# competitions/<name>/raw/ should contain Kaggle's train.csv + test.csv
+# kaggle-slayer auto-downloads competition data into raw/ on first run
+# (the slug is the workspace dir name; pass --no-download to use your own data)
 kaggle-slayer competitions/titanic --target Survived --metric accuracy
 ```
 
@@ -98,6 +99,8 @@ Useful flags:
 | `--resume` | Replay `run_log.jsonl` to seed a continuation. Auto-skips context rebuild. |
 | `--rebuild-context` | Force `context.md` regeneration even when resuming. |
 | `--no-context-build` | Skip context rebuild entirely (manual `context.md`). |
+| `--no-download` | Skip auto-downloading competition data into `raw/` (use data you placed there yourself). |
+| `--competition <slug>` | Kaggle competition slug to download. Defaults to the workspace directory name. |
 
 The agent's running history lives in `competitions/<name>/run_log.jsonl` and its scratchpad in `notes.jsonl`. After each `train_cv` the current `agent/fe.py` and `agent/model.py` are archived under `agent/versions/`.
 
