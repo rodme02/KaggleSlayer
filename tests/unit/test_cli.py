@@ -300,3 +300,58 @@ def test_cli_captures_unhandled_exception_to_errors_dir(tmp_path, monkeypatch):
     rec = json.loads(captured[0].read_text())
     assert rec["exception"]["type"] == "RuntimeError"
     assert "gemini boom" in rec["exception"]["message"]
+
+
+def test_cli_parses_download_flags(tmp_path):
+    args = cli._parse_args([
+        str(tmp_path / "comp"), "--target", "y",
+        "--no-download", "--competition", "titanic",
+    ])
+    assert args.no_download is True
+    assert args.competition == "titanic"
+
+
+def test_cli_download_flags_default(tmp_path):
+    args = cli._parse_args([str(tmp_path / "comp"), "--target", "y"])
+    assert args.no_download is False
+    assert args.competition is None
+
+
+def test_cli_no_download_passes_enabled_false(tmp_path):
+    """--no-download must reach ensure_competition_data as enabled=False."""
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    raw = comp_path / "raw"
+    raw.mkdir()
+    pd.DataFrame({"x": [1], "y": [0]}).to_csv(raw / "train.csv", index=False)
+    pd.DataFrame({"x": [1]}).to_csv(raw / "test.csv", index=False)
+
+    with patch("kaggle_slayer.cli.ensure_competition_data") as mock_ensure, \
+         patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(status="done", iterations=1, summary="")
+        mock_solver_cls.return_value = mock_solver
+
+        cli.run([str(comp_path), "--target", "y", "--no-download"])
+
+    mock_ensure.assert_called_once()
+    assert mock_ensure.call_args.kwargs["enabled"] is False
+
+
+def test_cli_download_failure_exits_2(tmp_path):
+    """A DownloadError from a needed fetch hard-exits with code 2."""
+    comp_path = tmp_path / "comp"
+
+    with patch(
+        "kaggle_slayer.cli.ensure_competition_data",
+        side_effect=cli.DownloadError("titanic", RuntimeError("403 Forbidden")),
+    ), \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+        exit_code = cli.run([str(comp_path), "--target", "y"])
+
+    assert exit_code == 2

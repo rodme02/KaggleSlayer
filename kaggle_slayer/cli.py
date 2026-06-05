@@ -29,6 +29,7 @@ from kaggle_slayer.agent.cost_ledger import CostLedger
 from kaggle_slayer.agent.llm_client import GeminiClient
 from kaggle_slayer.agent.solver import Solver
 from kaggle_slayer.harness.context import build_context
+from kaggle_slayer.harness.data import DownloadError, ensure_competition_data
 from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.kaggle_client import KaggleClient
 from kaggle_slayer.harness.workspace import Workspace
@@ -59,6 +60,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument("--no-context-build", action="store_true",
                    help="Skip rebuilding context.md (use existing one)")
+    p.add_argument("--no-download", action="store_true",
+                   help="Skip auto-downloading competition data into raw/ (use existing/manual data)")
+    p.add_argument("--competition", default=None,
+                   help="Kaggle competition slug to download (defaults to the workspace dir name)")
     p.add_argument("--resume", action="store_true",
                    help="Resume from run_log.jsonl (rebuilds conversation history)")
     p.add_argument("--rebuild-context", action="store_true",
@@ -85,6 +90,24 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         sys.exit(2)
 
     return args
+
+
+def _download_error_message(e: DownloadError) -> str:
+    """Render an actionable message for a failed competition download."""
+    cause = str(e.cause).lower()
+    base = f"ERROR: could not download competition {e.slug!r}"
+    tail = "Or pass --no-download if you'll provide data in raw/ yourself."
+    if "403" in cause or "forbidden" in cause:
+        return (
+            f"{base}: access denied. Accept the competition rules at "
+            f"https://www.kaggle.com/c/{e.slug}/rules, then rerun. {tail}"
+        )
+    if any(s in cause for s in ("kaggle.json", "credential", "authenticate", "401", "unauthorized")):
+        return (
+            f"{base}: no working Kaggle credentials. Set KAGGLE_API_TOKEN "
+            f"or run `python scripts/preflight.py`. {tail}"
+        )
+    return f"{base}: {e.cause}. {tail}"
 
 
 def run(argv: list[str]) -> int:
@@ -134,6 +157,19 @@ def _run_inner(argv: list[str]) -> int:
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         print("ERROR: no GEMINI_API_KEY / GOOGLE_API_KEY in env", file=sys.stderr)
+        return 2
+
+    # Auto-fetch competition data into raw/ unless opted out. Runs before
+    # build_context, which reads raw/train.csv for the data brief. A needed
+    # download that fails hard-exits (code 2) rather than letting the Solver
+    # burn tokens on empty data; --no-download is the escape hatch.
+    slug = args.competition or workspace.name
+    try:
+        ensure_competition_data(
+            workspace, KaggleClient(), slug=slug, enabled=not args.no_download,
+        )
+    except DownloadError as e:
+        print(_download_error_message(e), file=sys.stderr)
         return 2
 
     # Build context.md unless user opts out. On --resume, default to skipping
