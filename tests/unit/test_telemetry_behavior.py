@@ -79,6 +79,37 @@ def test_compute_metrics_turns_to_best_score_picks_first_max(ws):
     assert metrics.turns_to_best_score == 3
 
 
+def test_compute_metrics_turns_to_best_score_lower_is_better(ws):
+    """For rmse (higher_is_better=False) the best train_cv is the LOWEST mean."""
+    j = Journal(ws)
+    j.log_tool_call(tool="train_cv", args={}, result_summary="metric=rmse, mean=0.50, std=0.01")  # turn 1
+    j.log_tool_call(tool="train_cv", args={}, result_summary="metric=rmse, mean=0.30, std=0.01")  # turn 2 — best
+    j.log_tool_call(tool="train_cv", args={}, result_summary="metric=rmse, mean=0.40, std=0.01")  # turn 3
+
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.turns_to_best_score == 2
+    assert metrics.best_cv_mean == pytest.approx(0.30)
+
+
+def test_compute_metrics_parses_negative_mean(ws):
+    """r2 can be negative; a mean=-0.10 summary must be tracked, not dropped."""
+    j = Journal(ws)
+    j.log_tool_call(tool="train_cv", args={}, result_summary="metric=r2, mean=-0.10, std=0.01")
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.turns_to_best_score == 1
+    assert metrics.best_cv_mean == pytest.approx(-0.10)
+
+
+def test_compute_metrics_best_cv_defaults_to_higher_is_better(ws):
+    """Summaries without a metric= segment keep the historical max semantics."""
+    j = Journal(ws)
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.50, std=0.01")
+    j.log_tool_call(tool="train_cv", args={}, result_summary="mean=0.80, std=0.01")
+    metrics = behavior.compute_metrics(ws)
+    assert metrics.best_cv_mean == pytest.approx(0.80)
+    assert metrics.turns_to_best_score == 2
+
+
 def test_compute_metrics_turns_to_best_score_none_when_no_train_cv(ws):
     j = Journal(ws)
     j.log_tool_call(tool="take_note", args={}, result_summary="ok")

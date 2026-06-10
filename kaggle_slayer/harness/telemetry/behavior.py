@@ -17,12 +17,28 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kaggle_slayer.harness.journal import Journal
+from kaggle_slayer.harness.registry import metrics as metrics_registry
 from kaggle_slayer.harness.workspace import Workspace
 
 _SUBMIT_TOOLS = frozenset({"submit_kaggle", "submit_local"})
-# Same regex shape as dashboard.portfolio._MEAN_RE — parse the
-# `mean=<float>` substring train_cv writes into result_summary.
-_MEAN_RE = re.compile(r"mean=([0-9.]+)")
+# Parse the `mean=<float>` / `metric=<name>` substrings train_cv writes into
+# result_summary. The mean can be negative (r2). dashboard.portfolio delegates
+# here so this parsing lives in exactly one place.
+_MEAN_RE = re.compile(r"mean=(-?[0-9.]+)")
+_METRIC_RE = re.compile(r"metric=(\w+)")
+
+
+def _higher_is_better(summary: str) -> bool:
+    """Resolve score direction from the `metric=<name>` segment of a train_cv
+    summary via the metric registry. Summaries without one (or with an unknown
+    metric) keep the historical higher-is-better semantics."""
+    m = _METRIC_RE.search(summary)
+    if not m:
+        return True
+    try:
+        return metrics_registry.get(m.group(1)).higher_is_better
+    except KeyError:
+        return True
 
 
 @dataclass
@@ -32,6 +48,7 @@ class BehaviorMetrics:
     error_count: int = 0
     turns_to_first_submission: int | None = None
     turns_to_best_score: int | None = None
+    best_cv_mean: float | None = None
     tool_call_failure_rate: float = 0.0
 
 
@@ -62,9 +79,18 @@ def compute_metrics(workspace: Workspace) -> BehaviorMetrics:
                     mean = float(m.group(1))
                 except ValueError:
                     mean = None
-                if mean is not None and (best_mean is None or mean > best_mean):
-                    best_mean = mean
-                    turns_to_best = i
+                if mean is not None:
+                    # F14b applies here too: for rmse/mae/logloss the best
+                    # mean is the MIN, not the MAX (see handlers/ml.py).
+                    if best_mean is None:
+                        is_better = True
+                    elif _higher_is_better(summary):
+                        is_better = mean > best_mean
+                    else:
+                        is_better = mean < best_mean
+                    if is_better:
+                        best_mean = mean
+                        turns_to_best = i
 
     turns_total = sum(counts.values())
     failure_rate = errors / max(turns_total, 1)
@@ -74,6 +100,7 @@ def compute_metrics(workspace: Workspace) -> BehaviorMetrics:
         error_count=errors,
         turns_to_first_submission=first_submission_turn,
         turns_to_best_score=turns_to_best,
+        best_cv_mean=best_mean,
         tool_call_failure_rate=failure_rate,
     )
 

@@ -7,14 +7,11 @@ slow-tier integration test (Task 14).
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from kaggle_slayer.agent.cost_ledger import DEFAULT_LEDGER_PATH, CostLedger
-from kaggle_slayer.harness.journal import Journal
+from kaggle_slayer.harness.telemetry import behavior
 from kaggle_slayer.harness.workspace import Workspace
-
-_MEAN_RE = re.compile(r"mean=([0-9.]+)")
 
 
 def list_competitions(comps_root: Path) -> list[str]:
@@ -32,24 +29,10 @@ def list_competitions(comps_root: Path) -> list[str]:
 
 
 def best_cv_for(workspace: Workspace) -> float | None:
-    """Walk the journal, extract `mean=<float>` from train_cv result_summary
-    lines, return the max."""
-    j = Journal(workspace)
-    best: float | None = None
-    for rec in j.iter_records():
-        if rec.get("tool") != "train_cv" or rec.get("kind") != "tool_call":
-            continue
-        summary = rec.get("result_summary", "")
-        m = _MEAN_RE.search(summary)
-        if not m:
-            continue
-        try:
-            mean = float(m.group(1))
-        except ValueError:
-            continue
-        if best is None or mean > best:
-            best = mean
-    return best
+    """Best train_cv mean in the journal, metric-direction aware (min for
+    rmse/mae/logloss, max otherwise). Delegates to telemetry.behavior so the
+    summary parsing and direction logic live in exactly one place."""
+    return behavior.compute_metrics(workspace).best_cv_mean
 
 
 def render(comps_root: Path) -> None:
@@ -68,17 +51,13 @@ def render(comps_root: Path) -> None:
     ledger = CostLedger(path=DEFAULT_LEDGER_PATH)
     for name in names:
         ws = Workspace(root=comps_root / name)
-        cv = best_cv_for(ws)
+        metrics = behavior.compute_metrics(ws)
+        cv = metrics.best_cv_mean
         cost = ledger.total_for(competition=name)
-        run_log = ws.run_log_path
 
         with st.container(border=True):
             cols = st.columns([2, 1, 1, 1])
             cols[0].markdown(f"### `{name}`")
             cols[1].metric("Best CV", f"{cv:.4f}" if cv is not None else "—")
             cols[2].metric("Cost (USD)", f"${cost:.4f}")
-            tool_count = (
-                str(len(list(Journal(ws).iter_records())))
-                if run_log.exists() else "0"
-            )
-            cols[3].metric("Tool calls", tool_count)
+            cols[3].metric("Tool calls", str(metrics.turns_per_run))

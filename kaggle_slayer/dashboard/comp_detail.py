@@ -55,7 +55,9 @@ def render(workspace_root: Path) -> None:
     cal_rows = calibration_for(workspace)
     subs = list_submissions(workspace)
     cols = st.columns(4)
-    cols[0].metric("Tool calls", len(timeline))
+    # len(timeline) includes checkpoint records, so it is NOT the tool-call
+    # count ("Turns / run" below is). Label it for what it is.
+    cols[0].metric("Journal records", len(timeline))
     cols[1].metric("Cost (USD)", f"${cost:.4f}")
     cols[2].metric("Submissions", len(cal_rows))
     cols[3].metric("Submissions on disk", len(subs))
