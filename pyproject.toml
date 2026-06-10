@@ -65,6 +65,11 @@ Repository = "https://github.com/rodme02/KaggleSlayer"
 include = ["kaggle_slayer*"]
 exclude = ["tests*", "competitions*", "docs*"]
 
+[tool.setuptools.package-data]
+# load_system_prompt() reads this at runtime; without it non-editable
+# installs (built wheels) crash on the first Solver call.
+kaggle_slayer = ["agent/prompts/*.md"]
+
 [tool.ruff]
 line-length = 110
 target-version = "py311"
