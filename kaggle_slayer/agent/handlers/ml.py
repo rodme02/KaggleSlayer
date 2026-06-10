@@ -25,8 +25,6 @@ from kaggle_slayer.harness import cv as cv_mod
 from kaggle_slayer.harness.registry import cv_strategies, metrics
 from kaggle_slayer.harness.sandbox import lint_module
 
-_ALLOWED_CV_KINDS: frozenset[str] = frozenset({"kfold", "stratified_kfold", "time_series", "group_kfold"})
-
 
 def _require_files(ctx: Any) -> tuple[Path, Path]:
     fe = ctx.workspace.fe_path
@@ -52,8 +50,11 @@ def _lint_or_raise(path: Path) -> None:
 
 def set_cv(ctx: Any, *, kind: str, n_splits: int = 5, group_col: str | None = None) -> str:
     """Override the CV strategy for subsequent train_cv calls."""
-    if kind not in _ALLOWED_CV_KINDS:
-        raise ToolError(f"unknown CV kind {kind!r}; allowed: {sorted(_ALLOWED_CV_KINDS)}")
+    # Validate against the registry itself so a new strategy is usable here
+    # the moment it is registered (hard rule #3).
+    allowed = cv_strategies.list_strategies()
+    if kind not in allowed:
+        raise ToolError(f"unknown CV kind {kind!r}; allowed: {allowed}")
     if kind == "group_kfold" and not group_col:
         # F8: group_kfold is meaningless without a group column. Fail fast
         # with a hint rather than letting it explode later in cv.split().
@@ -174,20 +175,13 @@ def submit_local(ctx: Any, *, label: str) -> str:
     # Detect id column — use whichever of {id, Id, ID, PassengerId, ...} appears in test.
     id_col = _detect_id_column(test_df)
 
-    # Load agent modules and fit on the FULL train set.
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("_agent_fe_final", fe_path)
-    if spec is None or spec.loader is None:
-        raise ToolError(f"cannot load {fe_path}")
-    fe_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(fe_mod)
-
-    spec = importlib.util.spec_from_file_location("_agent_model_final", model_path)
-    if spec is None or spec.loader is None:
-        raise ToolError(f"cannot load {model_path}")
-    model_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(model_mod)
+    # Load agent modules via the harness's sanctioned loader (lints again,
+    # which is cheap) and fit on the FULL train set.
+    try:
+        fe_mod = cv_mod.load_agent_module(fe_path, "_agent_fe_final")
+        model_mod = cv_mod.load_agent_module(model_path, "_agent_model_final")
+    except cv_mod.CVError as e:
+        raise ToolError(str(e)) from e
 
     fe = fe_mod.fit_feature_transformer(train_df, ctx.target_col)
     X_train = fe.transform(train_df.drop(columns=[ctx.target_col]))
@@ -267,7 +261,9 @@ def set_metric(ctx: Any, *, name: str) -> str:
     try:
         metrics.get(name)
     except KeyError as e:
-        raise ToolError(f"unknown metric {name!r}; choose from the registry") from e
+        raise ToolError(
+            f"unknown metric {name!r}; choose from: {metrics.list_metrics()}"
+        ) from e
 
     handler = getattr(ctx, "checkpoint_handler", None)
     if handler is None:

@@ -69,6 +69,13 @@ def test_set_metric_validates_known_metric(ctx):
         ml_h.set_metric(ctx, name="bogus_metric")
 
 
+def test_set_metric_error_lists_registry_contents(ctx):
+    """The rejection names the valid choices so the agent can self-correct
+    without a second failed guess."""
+    with pytest.raises(ToolError, match="rmse"):
+        ml_h.set_metric(ctx, name="bogus_metric")
+
+
 def test_set_metric_journals_checkpoint_decision(ctx):
     ml_h.set_metric(ctx, name="auc")
     import json

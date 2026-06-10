@@ -43,12 +43,15 @@ class CVResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _load_module(path: Path, name: str) -> ModuleType:
+def load_agent_module(path: Path, name: str) -> ModuleType:
     """Dynamically import the agent's module from disk.
 
     Runs the sandbox AST lint FIRST and refuses to load the module if it
     contains forbidden patterns. The lint must run before any version
     archive copy so that a failed lint doesn't bump the version counter.
+
+    Public: this is the ONE sanctioned way to load agent-written code
+    (handlers/ml.py's submit_local reuses it for the full-train fit).
     """
     result = lint_module(path)
     if not result.ok:
@@ -113,8 +116,8 @@ def train_cv(
     fe_path = Path(fe_path)
     model_path = Path(model_path)
 
-    fe_mod = _load_module(fe_path, "_agent_fe")
-    model_mod = _load_module(model_path, "_agent_model")
+    fe_mod = load_agent_module(fe_path, "_agent_fe")
+    model_mod = load_agent_module(model_path, "_agent_model")
     fit_fe = _require_callable(fe_mod, "fit_feature_transformer", fe_path)
     fit_model = _require_callable(model_mod, "fit_model", model_path)
 

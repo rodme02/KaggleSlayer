@@ -32,6 +32,7 @@ from kaggle_slayer.harness.context import build_context
 from kaggle_slayer.harness.data import DownloadError, ensure_competition_data
 from kaggle_slayer.harness.journal import Journal
 from kaggle_slayer.harness.kaggle_client import KaggleClient
+from kaggle_slayer.harness.registry.metrics import list_metrics
 from kaggle_slayer.harness.workspace import Workspace
 
 
@@ -45,7 +46,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument("workspace_path", help="Path to per-competition workspace (e.g., competitions/titanic)")
     p.add_argument("--target", required=True, help="Target column name (required)")
-    p.add_argument("--metric", default="accuracy", help="Metric (accuracy, auc, logloss, rmse, mae, r2)")
+    p.add_argument("--metric", default="accuracy",
+                   help=f"Metric ({', '.join(list_metrics())})")
     p.add_argument("--problem-type", default="classification", choices=["classification", "regression"])
     p.add_argument("--max-iterations", type=int, default=25)
     p.add_argument("--time-budget-s", type=float, default=900.0)
