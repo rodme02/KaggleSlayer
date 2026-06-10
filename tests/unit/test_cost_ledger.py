@@ -87,6 +87,32 @@ def test_total_for_all_competitions(tmp_path):
     assert grand == pytest.approx(a + b, rel=1e-9)
 
 
+def test_total_for_skips_truncated_trailing_line(tmp_path):
+    """A partial line from a crash mid-write must not break totals
+    (mirrors Journal.iter_records / calibration.read_history)."""
+    ledger = cl.CostLedger(path=tmp_path / "cost.jsonl")
+    ledger.record(
+        model="gemini-2.5-flash",
+        input_tokens=100, output_tokens=50, cached_tokens=0, competition="a",
+    )
+    good_total = ledger.total_for()
+    with ledger.path.open("a") as f:
+        f.write('{"ts": "2026-06-10T00:00:00+00:00", "cost_us')  # NO newline, truncated
+    assert ledger.total_for() == pytest.approx(good_total)
+
+
+def test_total_for_skips_null_cost_usd(tmp_path):
+    """A row with cost_usd=null must be skipped, not raise TypeError."""
+    ledger = cl.CostLedger(path=tmp_path / "cost.jsonl")
+    with ledger.path.open("a") as f:
+        f.write(json.dumps({"competition": "a", "cost_usd": None}) + "\n")
+    ledger.record(
+        model="gemini-2.5-flash",
+        input_tokens=100, output_tokens=50, cached_tokens=0, competition="a",
+    )
+    assert ledger.total_for(competition="a") > 0
+
+
 def test_cached_tokens_billed_at_reduced_rate(tmp_path):
     ledger = cl.CostLedger(path=tmp_path / "cost.jsonl")
     full_cost = ledger.record(

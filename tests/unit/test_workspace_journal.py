@@ -135,6 +135,19 @@ def test_journal_truncates_long_arg_values_in_tool_error(fresh_workspace):
     assert "truncated" in rec_args["content"]
 
 
+def test_list_notes_skips_truncated_trailing_line(fresh_workspace):
+    """notes.jsonl is written via the same fsync append path as run_log.jsonl,
+    so it carries the same crash-mid-write risk; list_notes must skip a
+    partial trailing line rather than crashing (mirrors iter_records)."""
+    j = journal_mod.Journal(fresh_workspace)
+    j.take_note(category="observation", content="rows look clean")
+    with fresh_workspace.notes_path.open("a") as f:
+        f.write('{"category":"decision","content":"par')  # NO newline, truncated
+    notes = j.list_notes()
+    assert len(notes) == 1
+    assert notes[0]["content"] == "rows look clean"
+
+
 def test_iter_records_skips_truncated_trailing_line(fresh_workspace):
     """If the process crashed mid-write, the last line may be partial JSON.
     iter_records must skip it rather than crashing."""

@@ -86,7 +86,15 @@ class CostLedger:
                 line = line.strip()
                 if not line:
                     continue
-                rec = json.loads(line)
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    # Partial trailing write from a crash; skip it (mirrors
+                    # Journal.iter_records / calibration.read_history).
+                    continue
                 if competition is None or rec.get("competition") == competition:
-                    total += float(rec.get("cost_usd", 0.0))
+                    try:
+                        total += float(rec.get("cost_usd", 0.0))
+                    except (TypeError, ValueError):
+                        continue
         return total

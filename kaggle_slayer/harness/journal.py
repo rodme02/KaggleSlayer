@@ -137,7 +137,13 @@ class Journal:
                 line = line.strip()
                 if not line:
                     continue
-                rec = json.loads(line)
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    # Partial trailing write from a crash; skip it (same
+                    # resilience as iter_records — notes.jsonl is written
+                    # via the same _append path).
+                    continue
                 if category is None or rec.get("category") == category:
                     records.append(rec)
         return records
