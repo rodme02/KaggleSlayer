@@ -9,7 +9,6 @@ originally sent — so an aborted run can be resumed.
 from __future__ import annotations
 
 import json
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,27 +32,26 @@ def summarize(workspace: Workspace, *, stuck_window: int = 10, stuck_threshold: 
     stuck_loop detection: if the same (tool, args) tuple appears
     `stuck_threshold` times within the last `stuck_window` calls, flag it.
     """
-    j = Journal(workspace)
-    records = list(j.iter_records())
-
-    summary = ResumeSummary(total_calls=len(records))
-    if not records:
-        return summary
-
-    counts: Counter[str] = Counter()
-    for r in records:
-        counts[r["tool"]] += 1
-        if r["kind"] == "tool_error":
-            summary.error_count += 1
-    summary.tool_counts = dict(counts)
-    summary.last_call = records[-1]
-
-    # Stuck-loop detection (moved to telemetry.behavior for reuse).
+    # Counting lives in telemetry.behavior (single source for journal
+    # walking); checkpoint records carry no 'tool' key and are excluded.
     from kaggle_slayer.harness.telemetry import behavior  # noqa: PLC0415
 
-    summary.stuck_loop = behavior.detect_stuck_loop(
-        workspace, window=stuck_window, threshold=stuck_threshold,
+    metrics = behavior.compute_metrics(workspace)
+    summary = ResumeSummary(
+        total_calls=metrics.turns_per_run,
+        tool_counts=metrics.tool_counts,
+        error_count=metrics.error_count,
     )
+
+    records = list(Journal(workspace).iter_records())
+    summary.last_call = next(
+        (r for r in reversed(records) if r.get("kind") in ("tool_call", "tool_error")),
+        None,
+    )
+    if records:
+        summary.stuck_loop = behavior.detect_stuck_loop(
+            workspace, window=stuck_window, threshold=stuck_threshold,
+        )
     return summary
 
 
@@ -93,26 +91,18 @@ def rebuild_conversation(workspace: Workspace) -> list[Message]:
     messages: list[Message] = []
     for rec in records:
         kind = rec.get("kind")
-        if kind == "tool_call":
-            tool_name = rec.get("tool", "unknown")
-            args = rec.get("args", {})
-            result = rec.get("result_summary", "")
-            # F8: prefer the original LLM-issued id when the journal stored
-            # one; fall back to the synthetic resume_<n> for back-compat with
-            # journals written before tool_call_id was journalled.
-            tc_id = rec.get("tool_call_id") or f"resume_{len(messages)}"
-            tc = ToolCall(id=tc_id, name=tool_name, args=args)
-            messages.append(Message(role="model", content="", tool_calls=[tc]))
-            payload = json.dumps({"tool": tool_name, "result": result})
-            messages.append(Message(role="tool", content=payload))
-        elif kind == "tool_error":
-            tool_name = rec.get("tool", "unknown")
-            args = rec.get("args", {})
-            error = rec.get("error", "")
-            tc_id = rec.get("tool_call_id") or f"resume_{len(messages)}"
-            tc = ToolCall(id=tc_id, name=tool_name, args=args)
-            messages.append(Message(role="model", content="", tool_calls=[tc]))
-            payload = json.dumps({"tool": tool_name, "result": error})
-            messages.append(Message(role="tool", content=payload))
-        # kind=='checkpoint' is silently skipped
+        if kind not in ("tool_call", "tool_error"):
+            continue  # checkpoint records aren't part of the LLM conversation
+        tool_name = rec.get("tool", "unknown")
+        # F8: prefer the original LLM-issued id when the journal stored one;
+        # fall back to the synthetic resume_<n> for back-compat with journals
+        # written before tool_call_id was journalled.
+        tc_id = rec.get("tool_call_id") or f"resume_{len(messages)}"
+        tc = ToolCall(id=tc_id, name=tool_name, args=rec.get("args", {}))
+        messages.append(Message(role="model", content="", tool_calls=[tc]))
+        result = (
+            rec.get("result_summary", "") if kind == "tool_call" else rec.get("error", "")
+        )
+        payload = json.dumps({"tool": tool_name, "result": result})
+        messages.append(Message(role="tool", content=payload))
     return messages

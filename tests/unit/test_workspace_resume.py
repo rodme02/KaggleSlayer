@@ -48,6 +48,33 @@ def test_resume_summary_last_call(populated_workspace):
     assert summary.last_call["kind"] == "tool_call"
 
 
+def test_resume_summary_tolerates_checkpoint_records(populated_workspace):
+    """CheckpointHandler writes kind='checkpoint' records that have no 'tool'
+    key; summarize must skip them instead of raising KeyError, and must not
+    count them as tool calls."""
+    import json
+
+    with populated_workspace.run_log_path.open("a") as f:
+        f.write(json.dumps({
+            "ts": "2026-06-10T00:00:00+00:00",
+            "kind": "checkpoint",
+            "trigger": "submit_kaggle_first",
+            "decision": "approve",
+        }) + "\n")
+
+    summary = resume_mod.summarize(populated_workspace)
+    assert summary.total_calls == 4  # checkpoint record is not a tool call
+    assert summary.tool_counts == {
+        "load_competition": 1,
+        "profile_data": 1,
+        "submit_kaggle": 1,
+        "train_cv": 1,
+    }
+    # last_call reports the last *tool* activity, not the checkpoint record
+    assert summary.last_call is not None
+    assert summary.last_call["tool"] == "train_cv"
+
+
 def test_resume_summary_detects_stuck_loop(tmp_path):
     """5+ identical (tool, args) in a 10-call window indicates a stuck loop."""
     w = Workspace.create(root=tmp_path / "stuck")
