@@ -24,7 +24,9 @@ ENV/
 # IDE / editor
 .vscode/
 .idea/
-.claude/
+# .claude/ project scaffolding (commands, agents, settings.json) is committed;
+# only per-user local settings stay out.
+.claude/settings.local.json
 *.swp
 *.swo
 *~
