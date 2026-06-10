@@ -77,3 +77,4 @@ tensorboard_logs/
 .DS_Store
 Thumbs.db
 *.tmp
+coverage.xml
