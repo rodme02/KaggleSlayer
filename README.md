@@ -21,7 +21,7 @@ Full design lives in [`docs/superpowers/specs/2026-05-14-llm-agent-harness-desig
 
 ## Status
 
-End-to-end runnable. A clean clone runs the full test suite — **375 tests, ~5s, no API keys** — which is exactly what CI enforces (Linux 3.11 + 3.12). A *real* solve needs a Gemini API key plus Kaggle credentials; on the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
+End-to-end runnable. A clean clone runs the full test suite — **408 tests, ~5s, no API keys** — which is exactly what CI enforces (Linux 3.11 + 3.12). A *real* solve needs a Gemini API key plus Kaggle credentials; on the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
 
 > **Headline v1 goal:** a credential-free demo so a clean clone runs the agent loop end-to-end with **no keys** (fake-LLM + synthetic-comp path). This is **not wired yet** — until it is, a real solve requires Gemini. See [`GOALS.md`](GOALS.md) for the full v1 scope boundary.
 
@@ -37,17 +37,18 @@ What's shipped:
 - ✅ **Resume** — `kaggle-slayer ... --resume` rebuilds the conversation from `run_log.jsonl` and seeds the next solve
 - ✅ **CLI** — `kaggle-slayer <workspace> --target <col>` does the full thing; unhandled exceptions land as JSON crash reports under `~/.kaggle_slayer/errors/` (with env-var redaction + 100-file rotation) and exit code 4
 - ✅ **OpenTelemetry tracing** — `<workspace>/otel.jsonl` per run, one span for the loop + one per LLM call + one per tool dispatch (`harness/telemetry/otel.py`)
-- ✅ **CV↔LB calibration tracker** — every successful `submit_kaggle` appends to `~/.kaggle_slayer/calibration.jsonl` with cv_score (of *this* submission, not best-ever), problem_type, metric, cv_strategy; lb_score backfill is Week 6
+- ✅ **CV↔LB calibration tracker** — every successful `submit_kaggle` appends to `~/.kaggle_slayer/calibration.jsonl` with cv_score (of *this* submission, not best-ever), problem_type, metric, cv_strategy; lb_score backfill is post-v1 roadmap (see [`GOALS.md`](GOALS.md))
 - ✅ **MLflow logging** — one experiment per competition (`kaggleslayer/<comp>`), one run per `train_cv` call, with tags (`problem_type`, `kaggle_competition`), params (`cv_strategy`, `metric`, `fe_version`, `model_version`), metrics (`cv_mean`, `cv_std`, `fold_N`, `wall_clock_s`). Failures route to `<workspace>/mlflow_errors.log` and never crash the agent
 - ✅ **Agent behavior metrics** — `turns_per_run`, `turns_to_first_submission`, `turns_to_best_score`, `tool_call_failure_rate`, stuck-loop detector (consolidated from `resume.py`)
 - ✅ **Streamlit dashboard** — `kaggle-slayer-dashboard` console_script: portfolio page (list comps + best CV + cost + tool count) + comp-detail page (journal timeline + cost + calibration + behavior metrics + notes + submission CSV downloads). Read-only over disk
 - ✅ **Chaos tier** — `FailureInjectingLLMClient` fixture (seeded, configurable rate) + integration test asserting `result.status == "done"` deterministically under 5% transient injection
-- ✅ **375 unit + integration + chaos tests** (pass with no keys). ruff clean; mypy strict on `harness/` locally and `agent/` too. **CI type-checks the harness only** (`mypy kaggle_slayer/harness`) — see [`CLAUDE.md`](CLAUDE.md). ~95% coverage on new code.
+- ✅ **408 unit + integration + chaos tests** (pass with no keys). ruff clean; mypy strict on `harness/` locally and `agent/` too. **CI type-checks the harness only** (`mypy kaggle_slayer/harness`) — see [`CLAUDE.md`](CLAUDE.md). ~95% coverage on new code.
+- ✅ **Docs suite for Claude Code-driven development** — [`docs/architecture.md`](docs/architecture.md), six [ADRs](docs/adr/README.md), and `.claude/` commands (`/gates`, `/solve`, `/harness-review`, `/new-adr`) + a `harness-reviewer` agent.
 
 What's next (deferred to the post-v1 roadmap — see [`GOALS.md`](GOALS.md)):
 
 - The **credential-free demo** (the headline v1 goal): expose `tests/fixtures/synthetic_comp.py` + a fake-LLM path so a clean clone solves a comp with no keys.
-- Live leaderboard / benchmark across real Kaggle Playground comps, full docs (`docs/architecture.md`, ADRs, `.claude/` commands and subagents), MLflow artifact logging (fe.py / model.py / oof_preds), LB-score backfill into the calibration log, the fe_v01↔fe_v02 dashboard diff page, and the cross-comp dashboard page.
+- Live leaderboard / benchmark across real Kaggle Playground comps, MLflow artifact logging (fe.py / model.py / oof_preds), LB-score backfill into the calibration log, the fe_v01↔fe_v02 dashboard diff page, and the cross-comp dashboard page.
 
 ## Why "leak-free CV" is the headline
 
@@ -68,7 +69,7 @@ No API keys are needed to clone, install, and run the full test suite:
 git clone https://github.com/rodme02/KaggleSlayer.git
 cd KaggleSlayer
 pip install -e ".[dev,dashboard]"
-pytest -m "not slow"                                # ~5s, 375 tests, no keys
+pytest -m "not slow"                                # ~5s, 408 tests, no keys
 ```
 
 To run against a real competition you need a Gemini API key (Tier 1 billing recommended — Tier 0 free tier has 0 daily quota for `gemini-2.5-pro` and only 20/day for `gemini-2.5-flash`) and Kaggle API credentials. Copy [`.env.example`](.env.example) to `.env` and fill it in:
@@ -88,7 +89,7 @@ Useful flags:
 
 | Flag | What it does |
 | --- | --- |
-| `--target <col>` | Target column name (required for non-trivial runs) |
+| `--target <col>` | Target column name (**required**) |
 | `--metric {accuracy,auc,logloss,rmse,mae,r2}` | Scoring metric. Defaults to `accuracy`. |
 | `--problem-type {classification,regression}` | Defaults to `classification`. |
 | `--max-iterations N` | Solver iteration cap (default 25). |
@@ -104,6 +105,15 @@ Useful flags:
 
 The agent's running history lives in `competitions/<name>/run_log.jsonl` and its scratchpad in `notes.jsonl`. After each `train_cv` the current `agent/fe.py` and `agent/model.py` are archived under `agent/versions/`.
 
+## Documentation
+
+| Read | For |
+| --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | How it works: trust boundary, module map, anatomy of a solve, telemetry, test tiers |
+| [`docs/adr/`](docs/adr/README.md) | Why it's built this way — six architecture decision records |
+| [`GOALS.md`](GOALS.md) | Status, v1 scope boundary, post-v1 roadmap |
+| [`CLAUDE.md`](CLAUDE.md) | Working in this repo with Claude Code: hard rules, conventions, `/gates` & friends |
+
 ## Stack
 
 | Choice | Why |
@@ -113,7 +123,7 @@ The agent's running history lives in `competitions/<name>/run_log.jsonl` and its
 | **JSON-Schema for tool args** | `jsonschema.validate` runs before the handler, so a malformed call returns a typed `ToolError` the agent can self-correct on. Schemas are sanitized for Gemini's OpenAPI subset on the wire. |
 | **AST sandbox lint + RLIMIT subprocess** | Local M5 use; threat model is "agent typos itself," not adversarial. The lint catches `os.remove`, `subprocess`, `requests`, network, raw/* reads, symlinks. The subprocess sandbox caps memory, CPU, process count, and file size. |
 | **MLflow + Streamlit** | Per-comp run tracking (one experiment per comp, one run per `train_cv`) + per-comp dashboard pages (`kaggle-slayer-dashboard`). |
-| **Custom OTel JSONL exporter** | We use a thin in-tree tracer instead of `opentelemetry-sdk` — saves 1 MB+ of transitive deps; one swap to OTLP if/when we need it. |
+| **Custom OTel JSONL exporter** | We use a thin in-tree tracer with **no opentelemetry dependency at all** — saves 1 MB+ of transitive deps; one adapter swap to OTLP if/when we need it. |
 
 ## Repo layout
 
@@ -127,6 +137,7 @@ kaggle_slayer/
 │   ├─ resume.py               # rebuild_conversation from journal (stuck-loop delegated to telemetry.behavior)
 │   ├─ checkpoints.py          # typed gate, journalled decisions
 │   ├─ context.py              # context.md builder
+│   ├─ data.py                 # auto-download competition data into raw/
 │   ├─ kaggle_client.py        # extended Kaggle API
 │   ├─ sandbox.py              # AST lint + run_subprocess
 │   ├─ registry/               # metrics + CV strategies
@@ -151,8 +162,8 @@ scripts/preflight.py            # verify Gemini + Kaggle creds
 
 ## Status of testing
 
-- **Unit tier** — `pytest -m "not slow"`. 375 tests (1 environment-gated skip). Runs on every push. Linux 3.11 + 3.12 matrix in CI.
-- **Integration tier** — fake-LLM-driven scripted runs against a synthetic micro-comp (`tests/fixtures/synthetic_comp.py`). Also runs in CI under `-m integration` (selected automatically by file location).
+- **Non-slow tier** — `pytest -m "not slow"`. 408 tests (1 environment-gated skip), covering unit + integration + chaos. This single invocation is what CI runs on every push (Linux 3.11 + 3.12 matrix).
+- **Integration tier** — fake-LLM-driven scripted runs against a synthetic micro-comp (`tests/fixtures/synthetic_comp.py`). Marked `integration` per-test; included in CI via the default `-m "not slow"` invocation (there is no separate `-m integration` CI job).
 - **Chaos tier** — `pytest -m chaos`. Scripted Solver run wrapped in `FailureInjectingLLMClient` (5% transient injection, seeded) + `RetryingLLMClient` adapter. Verifies spec §11.3 / §13: the pipeline reaches `done` deterministically and the journal stays parseable. Runs in CI under the default `-m "not slow"` invocation.
 - **Slow tier (opt-in)** — real Gemini calls. `pytest -m slow`. 8 tests; ~$0.005–0.02 per run; skipped automatically when `GEMINI_API_KEY` is missing. Not part of CI.
 
