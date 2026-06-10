@@ -12,11 +12,14 @@ journal that makes any run resumable.
 
 What a clean clone can do **today**, with no API keys:
 
-- `pip install -e ".[dev,dashboard]"` then `pytest -m "not slow"` → **375 tests pass**
+- `pip install -e ".[dev,dashboard]"` then `pytest -m "not slow"` → **408 tests pass**
   (~5s). This is exactly what CI enforces on Linux 3.11 + 3.12.
 - `ruff check kaggle_slayer tests` is clean; `mypy kaggle_slayer/harness` is clean
   (CI type-checks the **harness only** — see CLAUDE.md).
 - `kaggle-slayer-dashboard` launches the read-only Streamlit dashboard over disk.
+- Docs suite shipped 2026-06-10 (pulled forward from the roadmap at user request):
+  `docs/architecture.md`, six ADRs under `docs/adr/`, and `.claude/` scaffolding
+  (`/gates`, `/solve`, `/harness-review`, `/new-adr` + a `harness-reviewer` agent).
 
 What needs credentials today: a **real solve** (`kaggle-slayer competitions/<name>
 --target <col>`) requires a Gemini API key and Kaggle credentials. There is **no
@@ -50,9 +53,10 @@ adding new agent capabilities.
 - MLflow artifact logging (`fe.py` / `model.py` / `oof_preds.npy`)
 - CV↔LB backfill (writing the `lb_score` side of the calibration log)
 - Dashboard diff page (`fe_v01`↔`fe_v02`) and cross-comp page
-- ADRs (`docs/adr/*.md`)
-- `.claude/` scaffolding (commands + subagents)
 - Phase 2 / Phase 3 features (multi-agent, cloud-burst, NLP / CV / audio tracks)
+
+(ADRs and `.claude/` scaffolding were originally deferred here; both shipped
+2026-06-10.)
 
 ## Post-v1 roadmap
 
@@ -63,8 +67,6 @@ adding new agent capabilities.
 | **CV↔LB backfill** | Backfill `lb_score` into `~/.kaggle_slayer/calibration.jsonl` after Kaggle scores a submission; today only the CV side is written. |
 | **Dashboard diff page** | Compare `fe_v01`↔`fe_v02` across archived agent versions. |
 | **Dashboard cross-comp page** | Aggregate metrics across competitions. |
-| **ADRs** | `docs/adr/*.md` capturing the harness/agent split, the leak-free-CV rebuild, sandbox threat model, telemetry choices. |
-| **`.claude/` scaffolding** | `.claude/commands/*.md` + a `harness-reviewer` subagent. |
 | **Phase 2 / Phase 3** | Multi-agent, cloud-burst, and NLP / CV / audio tracks — explicitly deferred. |
 
 ## Invariants v1 must never regress
