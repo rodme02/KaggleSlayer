@@ -27,13 +27,19 @@ def _in_streamlit_runtime() -> bool:
         return False
 
 
+def _streamlit_argv(script: Path, user_args: list[str]) -> list[str]:
+    """argv for the `streamlit run` re-exec. User args are forwarded as
+    streamlit flags (e.g. --server.port 8502) instead of being dropped."""
+    return ["streamlit", "run", str(script), *user_args]
+
+
 def main() -> None:
     """Entry point for `kaggle-slayer-dashboard`."""
     # When invoked as a console_script (not via `streamlit run`), re-exec under
     # streamlit so the user gets the browser UI.
     if not _in_streamlit_runtime():
         import streamlit.web.cli as stcli  # type: ignore[import-untyped]
-        sys.argv = ["streamlit", "run", str(Path(__file__).resolve())]
+        sys.argv = _streamlit_argv(Path(__file__).resolve(), sys.argv[1:])
         sys.exit(stcli.main())
     _run_pages()
 

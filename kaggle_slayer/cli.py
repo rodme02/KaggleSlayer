@@ -44,7 +44,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     p.add_argument("workspace_path", help="Path to per-competition workspace (e.g., competitions/titanic)")
-    p.add_argument("--target", default=None, help="Target column name")
+    p.add_argument("--target", required=True, help="Target column name (required)")
     p.add_argument("--metric", default="accuracy", help="Metric (accuracy, auc, logloss, rmse, mae, r2)")
     p.add_argument("--problem-type", default="classification", choices=["classification", "regression"])
     p.add_argument("--max-iterations", type=int, default=25)
@@ -89,6 +89,23 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         )
         sys.exit(2)
 
+    # Surface no-op / conflicting flag combinations instead of accepting
+    # them silently (review).
+    if args.rebuild_context and not args.resume:
+        print("warning: --rebuild-context has no effect without --resume", file=sys.stderr)
+    if args.no_context_build and args.rebuild_context:
+        print(
+            "warning: --no-context-build overrides --rebuild-context; "
+            "context.md will not be rebuilt",
+            file=sys.stderr,
+        )
+    if args.competition and args.no_download:
+        print(
+            "warning: --competition only affects the auto-download; it has "
+            "no effect with --no-download",
+            file=sys.stderr,
+        )
+
     return args
 
 
@@ -131,9 +148,14 @@ def run(argv: list[str]) -> int:
                 recent_calls = list(Journal(ws).iter_records())[-10:]
         except Exception:  # noqa: BLE001
             pass
-        path = errors.capture(e, recent_calls=recent_calls, env=dict(os.environ))
         print(f"\nERROR: {type(e).__name__}: {e}", file=sys.stderr)
-        print(f"crash report written to {path}", file=sys.stderr)
+        # The crash-report writer must never mask the crash itself: if
+        # capture fails (disk full, unwritable home), report and move on.
+        try:
+            path = errors.capture(e, recent_calls=recent_calls, env=dict(os.environ))
+            print(f"crash report written to {path}", file=sys.stderr)
+        except Exception as capture_err:  # noqa: BLE001
+            print(f"(crash report could not be written: {capture_err!r})", file=sys.stderr)
         return 4
 
 
@@ -151,13 +173,18 @@ def _run_inner(argv: list[str]) -> int:
             style="yellow",
         ))
 
-    comp_path = Path(args.workspace_path)
-    workspace = Workspace.create(root=comp_path)
-
+    # Check credentials BEFORE creating workspace directories, so a typo'd
+    # invocation without keys doesn't litter the filesystem.
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         print("ERROR: no GEMINI_API_KEY / GOOGLE_API_KEY in env", file=sys.stderr)
         return 2
+
+    # resolve() so `kaggle-slayer .` derives the real directory name —
+    # Path('.').name is '', which would mean an empty download slug and
+    # misattributed cost/telemetry.
+    comp_path = Path(args.workspace_path).resolve()
+    workspace = Workspace.create(root=comp_path)
 
     # Auto-fetch competition data into raw/ unless opted out. Runs before
     # build_context, which reads raw/train.csv for the data brief. A needed
@@ -228,7 +255,7 @@ def _run_inner(argv: list[str]) -> int:
     solver = Solver(
         workspace=workspace,
         llm_client=llm,
-        target_col=args.target or "target",
+        target_col=args.target,
         problem_type=args.problem_type,
         metric_name=args.metric,
         max_iterations=args.max_iterations,

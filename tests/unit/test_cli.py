@@ -39,14 +39,22 @@ def test_cli_default_model_is_flash(tmp_path):
     Pro is unvalidated and 10x more expensive, plus it hits free-tier quota
     walls. Flash is the safe default; Pro is opt-in via --model gemini-2.5-pro.
     """
-    args = cli._parse_args([str(tmp_path / "comp")])
+    args = cli._parse_args([str(tmp_path / "comp"), "--target", "y"])
     assert args.model == "gemini-2.5-flash"
 
 
 def test_cli_model_can_be_overridden(tmp_path):
     """F5: --model can be overridden to a different Gemini model id."""
-    args = cli._parse_args([str(tmp_path), "--model", "gemini-2.5-pro"])
+    args = cli._parse_args([str(tmp_path), "--target", "y", "--model", "gemini-2.5-pro"])
     assert args.model == "gemini-2.5-pro"
+
+
+def test_cli_target_is_required(tmp_path):
+    """Omitting --target must fail at parse time instead of silently
+    defaulting to 'target' and burning Gemini tokens on a wrong column."""
+    with pytest.raises(SystemExit) as ex:
+        cli._parse_args([str(tmp_path / "comp")])
+    assert ex.value.code == 2
 
 
 def test_cli_run_creates_workspace_and_calls_solver(tmp_path):
@@ -300,6 +308,97 @@ def test_cli_captures_unhandled_exception_to_errors_dir(tmp_path, monkeypatch):
     rec = json.loads(captured[0].read_text())
     assert rec["exception"]["type"] == "RuntimeError"
     assert "gemini boom" in rec["exception"]["message"]
+
+
+def test_cli_missing_api_key_does_not_create_workspace(tmp_path):
+    """No API key exits 2 BEFORE creating workspace directories — a typo'd
+    invocation must not litter the filesystem."""
+    comp_path = tmp_path / "comp"
+    with patch("kaggle_slayer.cli.os.environ", {}), \
+         patch("kaggle_slayer.cli.load_dotenv"), \
+         patch("kaggle_slayer.cli.KaggleClient"):
+        exit_code = cli.run([str(comp_path), "--target", "y"])
+    assert exit_code == 2
+    assert not comp_path.exists()
+
+
+def test_cli_workspace_path_dot_resolves_to_real_name(tmp_path, monkeypatch):
+    """`kaggle-slayer .` from inside a workspace dir must derive the real
+    directory name — Path('.').name is '', which would mean an empty
+    download slug and misattributed cost/telemetry."""
+    comp_path = tmp_path / "mycomp"
+    comp_path.mkdir()
+    raw = comp_path / "raw"
+    raw.mkdir()
+    pd.DataFrame({"x": [1], "y": [0]}).to_csv(raw / "train.csv", index=False)
+    pd.DataFrame({"x": [1]}).to_csv(raw / "test.csv", index=False)
+    monkeypatch.chdir(comp_path)
+
+    with patch("kaggle_slayer.cli.Solver") as mock_solver_cls, \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"), \
+         patch("kaggle_slayer.cli.GeminiClient"), \
+         patch("kaggle_slayer.cli.os.environ", {"GEMINI_API_KEY": "fake"}):
+        mock_solver = MagicMock()
+        mock_solver.solve.return_value = MagicMock(status="done", iterations=1, summary="")
+        mock_solver_cls.return_value = mock_solver
+
+        cli.run([".", "--target", "y"])
+
+    ws = mock_solver_cls.call_args.kwargs["workspace"]
+    assert ws.name == "mycomp"
+
+
+def test_cli_crash_handler_survives_capture_failure(tmp_path, monkeypatch, capsys):
+    """If errors.capture itself fails, the original error and exit code 4
+    must survive — the crash-report writer must never mask the crash."""
+    from unittest.mock import MagicMock as MM
+
+    from kaggle_slayer.harness.telemetry import errors as errors_mod
+    monkeypatch.setattr(errors_mod, "capture", MM(side_effect=OSError("disk full")))
+
+    comp_path = tmp_path / "comp"
+    comp_path.mkdir()
+    raw = comp_path / "raw"
+    raw.mkdir()
+    pd.DataFrame({"x": [1], "y": [0]}).to_csv(raw / "train.csv", index=False)
+    pd.DataFrame({"x": [1]}).to_csv(raw / "test.csv", index=False)
+
+    monkeypatch.setenv("GEMINI_API_KEY", "fake")
+    with patch("kaggle_slayer.cli.GeminiClient", side_effect=RuntimeError("gemini boom")), \
+         patch("kaggle_slayer.cli.build_context"), \
+         patch("kaggle_slayer.cli.KaggleClient"):
+        exit_code = cli.run([str(comp_path), "--target", "y"])
+
+    assert exit_code == 4
+    err = capsys.readouterr().err
+    assert "gemini boom" in err
+
+
+def test_cli_warns_on_rebuild_context_without_resume(tmp_path, capsys):
+    """--rebuild-context without --resume is a no-op; warn instead of
+    silently accepting it."""
+    cli._parse_args([str(tmp_path / "comp"), "--target", "y", "--rebuild-context"])
+    assert "warning" in capsys.readouterr().err.lower()
+
+
+def test_cli_warns_on_competition_with_no_download(tmp_path, capsys):
+    """--competition only affects the download; with --no-download it is
+    dead weight — warn."""
+    cli._parse_args([
+        str(tmp_path / "comp"), "--target", "y",
+        "--competition", "titanic", "--no-download",
+    ])
+    assert "warning" in capsys.readouterr().err.lower()
+
+
+def test_cli_warns_on_no_context_build_with_rebuild_context(tmp_path, capsys):
+    """--no-context-build wins over --rebuild-context; surface the conflict."""
+    cli._parse_args([
+        str(tmp_path / "comp"), "--target", "y",
+        "--resume", "--no-context-build", "--rebuild-context",
+    ])
+    assert "warning" in capsys.readouterr().err.lower()
 
 
 def test_cli_parses_download_flags(tmp_path):
