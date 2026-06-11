@@ -101,3 +101,12 @@ def test_set_attribute_after_span_exit_does_not_mutate_written_record(ws):
     rec = next(r for r in records if r["name"] == "sealed")
     assert rec["attributes"].get("early") == "yes"
     assert "late" not in rec["attributes"]
+
+def test_span_write_failure_does_not_crash(tmp_path):
+    """Hard rule #6: an unwritable otel.jsonl must not abort the Solver loop
+    (or mask the in-flight tool exception from a span's finally block)."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where a directory should be")
+    t = otel.Tracer(file_path=blocker / "otel.jsonl", trace_id="t1")
+    with t.start_span("solve.loop"):
+        pass  # exiting the span writes; the failure must be swallowed

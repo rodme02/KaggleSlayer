@@ -284,3 +284,18 @@ def test_submit_kaggle_skips_calibration_on_denial(tmp_path, monkeypatch):
         )
 
     assert not cal_path.exists() or cal_path.read_text().strip() == ""
+
+def test_submit_succeeds_even_if_calibration_write_fails(tmp_path, monkeypatch):
+    """Hard rule #6: a calibration-log failure AFTER the Kaggle push must not
+    fail the tool — the agent would think the submit failed and retry,
+    burning the daily submission cap."""
+    from kaggle_slayer.harness.telemetry import calibration
+
+    ctx = _make_ctx(tmp_path)
+    monkeypatch.setattr(
+        calibration, "record", MagicMock(side_effect=OSError("disk full"))
+    )
+    result = ml_h.submit_kaggle(
+        ctx, csv_path="submissions/2026-05-15_001_lr.csv", message="v1"
+    )
+    assert "submitted" in result

@@ -136,24 +136,37 @@ def log_train_cv(
         except Exception as exc:  # noqa: BLE001
             _log.exception("mlflow.set_tracking_uri failed; continuing")
             _record_error(workspace, "mlflow.set_tracking_uri failed", exc)
+    started = False
     try:
         mlflow.set_experiment(f"kaggleslayer/{competition}")
-        # mlflow.start_run() ends the run on context exit, even if log_params raises.
-        with mlflow.start_run():
-            mlflow.set_tags({
-                "kaggle_competition": competition,
-                "problem_type": problem_type,
-            })
-            mlflow.log_params({
-                "cv_strategy": cv_strategy,
-                "metric": metric,
-                "fe_version": fe_version,
-                "model_version": model_version,
-            })
-            yield logger
+        mlflow.start_run()
+        started = True
+        mlflow.set_tags({
+            "kaggle_competition": competition,
+            "problem_type": problem_type,
+        })
+        mlflow.log_params({
+            "cv_strategy": cv_strategy,
+            "metric": metric,
+            "fe_version": fe_version,
+            "model_version": model_version,
+        })
     except Exception as exc:  # noqa: BLE001
-        # MLflow itself blew up. Still yield a logger so caller code is identical;
+        # MLflow itself blew up; the caller still gets a logger and
         # log_result will fail silently inside.
         _log.exception("mlflow.start_run / set_experiment failed; metrics not recorded")
         _record_error(workspace, "mlflow.start_run / set_experiment failed", exc)
+    # Exactly ONE yield, outside any except: a caller exception thrown into
+    # the generator must propagate untouched. The previous shape (yield
+    # inside try + a second yield in except) caught the caller's error and
+    # re-yielded, so every failing train_cv surfaced as RuntimeError
+    # ("generator didn't stop after throw()") instead of its real message.
+    try:
         yield logger
+    finally:
+        if started:
+            try:
+                mlflow.end_run()
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("mlflow.end_run failed; continuing")
+                _record_error(workspace, "mlflow.end_run failed", exc)

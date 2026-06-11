@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -24,6 +25,8 @@ from kaggle_slayer.agent.tools import ToolError
 from kaggle_slayer.harness import cv as cv_mod
 from kaggle_slayer.harness.registry import cv_strategies, metrics
 from kaggle_slayer.harness.sandbox import lint_module
+
+_log = logging.getLogger(__name__)
 
 
 def _require_files(ctx: Any) -> tuple[Path, Path]:
@@ -355,14 +358,20 @@ def submit_kaggle(ctx: Any, *, csv_path: str, message: str) -> str:
     # best_cv_mean (the running max). The two diverge whenever the agent
     # submits a worse-but-still-approved model after a stronger one.
     last_cv = getattr(ctx, "last_cv_mean", None)
-    calibration.record(
-        competition=ctx.competition,
-        cv_score=float(last_cv) if last_cv is not None else float("nan"),
-        lb_score=None,
-        problem_type=ctx.problem_type,
-        metric=ctx.metric_name,
-        cv_strategy=cv_strategy_name,
-    )
+    try:
+        calibration.record(
+            competition=ctx.competition,
+            cv_score=float(last_cv) if last_cv is not None else float("nan"),
+            lb_score=None,
+            problem_type=ctx.problem_type,
+            metric=ctx.metric_name,
+            cv_strategy=cv_strategy_name,
+        )
+    except Exception:  # noqa: BLE001
+        # Hard rule #6: the Kaggle push already succeeded; a calibration-log
+        # failure must not convert that into a ToolError — the agent would
+        # think the submit failed, retry, and burn the daily submission cap.
+        _log.exception("calibration.record failed after submit; continuing")
     return f"submitted '{target_csv.name}' to {ctx.competition!r} (msg={message!r})"
 
 

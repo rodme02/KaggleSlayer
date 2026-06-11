@@ -210,3 +210,16 @@ def test_log_train_cv_no_workspace_falls_back_to_log_only(ws):
     # No file lookup needed — only confirm no crash. We DO confirm the
     # workspace-less branch wrote no file at the workspace path either.
     assert not (ws.root / "mlflow_errors.log").exists()
+
+def test_log_train_cv_caller_exception_propagates_unmasked(ws):
+    """A failing train_cv inside the block must surface ITS error — not
+    RuntimeError("generator didn't stop after throw()"). The agent reads the
+    error text to self-correct; masking it breaks the feedback loop."""
+    with patch("kaggle_slayer.harness.telemetry.mlflow_logger.mlflow"):
+        with pytest.raises(ValueError, match="boom"):
+            with mlflow_logger.log_train_cv(
+                competition="x", cv_strategy="kfold", metric="rmse",
+                fe_version="fe_v01", model_version="model_v01",
+                problem_type="regression", workspace=ws,
+            ):
+                raise ValueError("boom")

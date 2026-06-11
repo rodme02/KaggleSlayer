@@ -20,6 +20,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import json
+import logging
 import os
 import time
 from collections.abc import Iterator
@@ -28,6 +29,8 @@ from pathlib import Path
 from typing import Any
 
 from kaggle_slayer.harness.workspace import Workspace
+
+_log = logging.getLogger(__name__)
 
 _OTEL_FILENAME = "otel.jsonl"
 
@@ -112,11 +115,20 @@ class Tracer:
         }
         if span.error is not None:
             record["error"] = span.error
-        self._file.parent.mkdir(parents=True, exist_ok=True)
-        with self._file.open("a") as f:
-            f.write(json.dumps(record) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        # Hard rule #6: tracing must never abort the solve. _write runs in a
+        # span's `finally`, where a raise would also mask the tool's own
+        # in-flight exception — swallow and log instead.
+        try:
+            self._file.parent.mkdir(parents=True, exist_ok=True)
+            with self._file.open("a") as f:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError:
+            _log.warning(
+                "otel: failed to append span %r to %s; continuing",
+                span.name, self._file, exc_info=True,
+            )
 
 
 def make_tracer(workspace: Workspace, *, run_name: str) -> Tracer:
