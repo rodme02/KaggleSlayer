@@ -108,6 +108,32 @@ def test_write_file_rejects_directory_path(ctx):
         fh.write_file(ctx, path="agent", content="x")
 
 
+def test_write_file_rejects_leaderboard_jsonl(ctx):
+    """submissions/leaderboard.jsonl is the submit gate's evidence — the
+    agent must not be able to rewrite it via write_file."""
+    with pytest.raises(ToolError, match="protected"):
+        fh.write_file(ctx, path="submissions/leaderboard.jsonl", content="{}")
+
+
+def test_write_file_rejects_leaderboard_jsonl_case_insensitive(ctx):
+    with pytest.raises(ToolError, match="protected"):
+        fh.write_file(ctx, path="submissions/Leaderboard.JSONL", content="{}")
+
+
+def test_write_file_rejects_raw_paths(ctx):
+    """Competition data is read-only for the agent; overwriting raw/train.csv
+    would silently corrupt every later train_cv."""
+    with pytest.raises(ToolError, match="read-only"):
+        fh.write_file(ctx, path="raw/train.csv", content="id\n1\n")
+
+
+def test_write_file_still_allows_submission_csvs(ctx):
+    """Only leaderboard.jsonl is protected under submissions/ — ordinary
+    CSVs the agent stages there are fine."""
+    fh.write_file(ctx, path="submissions/preds.csv", content="id,target\n1,0\n")
+    assert (ctx.workspace.submissions_dir / "preds.csv").exists()
+
+
 def test_sample_rows_returns_first_n_rows(ctx):
     df = pd.DataFrame({"a": range(20), "b": list("abcdefghijklmnopqrst")})
     df.to_csv(ctx.workspace.raw_dir / "train.csv", index=False)

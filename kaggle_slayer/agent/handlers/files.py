@@ -67,9 +67,19 @@ def write_file(ctx: Any, *, path: str, content: str) -> str:
     rather than a generic IsADirectoryError from pathlib's write_text.
     """
     target = _resolve_under(ctx.workspace.root, path)
+    raw_dir = ctx.workspace.raw_dir.resolve()
+    if target == raw_dir or target.is_relative_to(raw_dir):
+        raise ToolError(
+            f"path {path!r} is under raw/ — competition data is read-only"
+        )
     if (
         target.name.lower() in _PROTECTED_BASENAMES
         and target.parent == ctx.workspace.root.resolve()
+    ) or (
+        # leaderboard.jsonl is the submit gate's evidence (first-submit and
+        # regression classification read it); the agent must not forge it.
+        target.name.lower() == "leaderboard.jsonl"
+        and target.parent == ctx.workspace.submissions_dir.resolve()
     ):
         raise ToolError(f"path {path!r} is protected (harness writes it)")
     if target == ctx.workspace.root.resolve() or target.is_dir():

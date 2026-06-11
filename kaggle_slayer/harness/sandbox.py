@@ -30,9 +30,11 @@ from __future__ import annotations
 import ast
 import contextlib
 import datetime as _dt
+import re
 import resource as _resource  # POSIX-only; we don't support Windows
 import subprocess as _subprocess
 import sys as _sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -67,9 +69,12 @@ _FORBIDDEN_ATTR_CALLS: tuple[tuple[str, ...], ...] = (
 
 _FORBIDDEN_BUILTINS: frozenset[str] = frozenset({"eval", "exec", "compile", "__import__"})
 
-# Path literals starting with these prefixes are forbidden as arguments to
-# file-reading calls — agent code must not directly touch competition data.
-_FORBIDDEN_PATH_PREFIXES: tuple[str, ...] = ("raw/", "raw\\", "/raw/", "./raw/")
+# Any path literal containing a `raw/` *segment* is forbidden as an argument
+# to file-reading calls — agent code must not directly touch competition data.
+# Segment matching (not prefix matching) so '../raw/x.csv' and
+# 'competitions/<name>/raw/x.csv' are caught while 'draw/x.csv' and
+# 'raw_features.csv' are not.
+_RAW_SEGMENT_RE = re.compile(r"(^|[/\\])raw[/\\]")
 
 # Calls whose first string-literal argument we check for forbidden path prefixes.
 _PATH_OPEN_CALLS: frozenset[tuple[str, ...]] = frozenset({
@@ -97,6 +102,19 @@ _PATH_OPEN_CALLS: frozenset[tuple[str, ...]] = frozenset({
 _FORBIDDEN_ABS_PATHS: tuple[str, ...] = (
     "/etc/", "/var/", "/usr/", "/root/",
 )
+
+
+def _string_literal_args(node: ast.Call) -> Iterator[str]:
+    """Yield every string-literal argument of a call — the first positional
+    plus all keyword values, so `pd.read_csv(filepath_or_buffer=...)` is
+    checked the same as the positional form."""
+    candidates: list[ast.expr] = []
+    if node.args:
+        candidates.append(node.args[0])
+    candidates.extend(kw.value for kw in node.keywords)
+    for arg in candidates:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            yield arg.value
 
 
 @dataclass(frozen=True)
@@ -208,26 +226,16 @@ class _ForbidVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _check_raw_path_arg(self, chain: tuple[str, ...], node: ast.Call) -> None:
-        if not node.args:
-            return
-        arg = node.args[0]
-        if (
-            isinstance(arg, ast.Constant)
-            and isinstance(arg.value, str)
-            and any(arg.value.startswith(p) for p in _FORBIDDEN_PATH_PREFIXES)
-        ):
-            self._violate(
-                f"forbidden {'.'.join(chain)} read of competition raw/ path: {arg.value!r}",
-                node,
-            )
+        for value in _string_literal_args(node):
+            if _RAW_SEGMENT_RE.search(value):
+                self._violate(
+                    f"forbidden {'.'.join(chain)} read of competition raw/ path: {value!r}",
+                    node,
+                )
 
     def _check_open_path(self, node: ast.Call) -> None:
-        if not node.args:
-            return
-        arg = node.args[0]
-        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-            value = arg.value
-            if any(value.startswith(p) for p in _FORBIDDEN_PATH_PREFIXES):
+        for value in _string_literal_args(node):
+            if _RAW_SEGMENT_RE.search(value):
                 self._violate(
                     f"forbidden open of competition raw/ path: {value!r}", node
                 )

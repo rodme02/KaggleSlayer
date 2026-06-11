@@ -169,6 +169,55 @@ def test_lint_aggregates_multiple_violations(tmp_path):
     assert len(result.violations) >= 2
 
 
+def test_lint_rejects_raw_read_via_keyword_arg(tmp_path):
+    """pd.read_csv(filepath_or_buffer='raw/...') must be caught, not just the
+    positional form."""
+    p = _write(tmp_path, "fe.py", """
+        import pandas as pd
+        def fit_feature_transformer(train_df, target_col):
+            return pd.read_csv(filepath_or_buffer="raw/train.csv")
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+
+
+def test_lint_rejects_raw_read_via_parent_traversal(tmp_path):
+    """'../raw/train.csv' reaches the same data; prefix-only matching missed it."""
+    p = _write(tmp_path, "fe.py", """
+        import pandas as pd
+        def fit_feature_transformer(train_df, target_col):
+            return pd.read_csv("../titanic/raw/train.csv")
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+
+
+def test_lint_rejects_raw_read_via_nested_path(tmp_path):
+    """In-process CV runs with cwd at the repo root, so a workspace-qualified
+    'competitions/<name>/raw/...' literal reads the full dataset too."""
+    p = _write(tmp_path, "fe.py", """
+        import pandas as pd
+        def fit_feature_transformer(train_df, target_col):
+            return pd.read_csv("competitions/titanic/raw/train.csv")
+    """)
+    result = sandbox.lint_module(p)
+    assert not result.ok
+
+
+def test_lint_allows_raw_lookalike_segments(tmp_path):
+    """'draw/' and 'raw_features.csv' are not the raw/ directory — no false
+    positives from substring matching."""
+    p = _write(tmp_path, "fe.py", """
+        import pandas as pd
+        def fit_feature_transformer(train_df, target_col):
+            a = pd.read_csv("draw/data.csv")
+            b = pd.read_csv("agent/raw_features.csv")
+            return a, b
+    """)
+    result = sandbox.lint_module(p)
+    assert result.ok, result.violations
+
+
 def test_lint_allows_open_of_workspace_user_path(tmp_path):
     """Workspace paths under /Users/, /home/, /private/ must lint clean
     (the workspace lives under one of these on macOS/Linux)."""
