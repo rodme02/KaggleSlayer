@@ -38,7 +38,7 @@ cross-validation, journals every tool call, gates Kaggle submissions, and ships 
 
 ```bash
 pip install -e ".[dev,dashboard]"
-pytest -m "not slow"                                  # ~5s, 408 tests, no keys — the merge gate
+pytest -m "not slow"                                  # ~5s, 419 tests, no keys — the merge gate
 pytest -m slow                                        # opt-in real-Gemini ($)
 pytest -m chaos                                       # chaos tier (injected LLM failures)
 ruff check kaggle_slayer tests

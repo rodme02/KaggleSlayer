@@ -12,7 +12,7 @@ journal that makes any run resumable.
 
 What a clean clone can do **today**, with no API keys:
 
-- `pip install -e ".[dev,dashboard]"` then `pytest -m "not slow"` → **408 tests pass**
+- `pip install -e ".[dev,dashboard]"` then `pytest -m "not slow"` → **419 tests pass**
   (~5s). This is exactly what CI enforces on Linux 3.11 + 3.12.
 - `ruff check kaggle_slayer tests` is clean; `mypy kaggle_slayer/harness` is clean
   (CI type-checks the **harness only** — see CLAUDE.md).

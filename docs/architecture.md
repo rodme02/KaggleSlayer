@@ -150,7 +150,7 @@ All JSONL readers tolerate a corrupt trailing line (crash mid-write).
 | Chaos | `chaos` | fake LLM with 5% injected failures, seeded | small |
 | Slow | `slow` (deselected by default) | **real Gemini** ($), opt-in | 8 |
 
-`pytest -m "not slow"` (408 passed, 1 env-gated skip, ~5s) is the merge gate and
+`pytest -m "not slow"` (419 passed, 1 env-gated skip, ~5s) is the merge gate and
 exactly what CI runs on Linux 3.11 + 3.12, plus `ruff check` and
 `mypy kaggle_slayer/harness`. Fixtures: `tests/fixtures/fake_llm.py` (scriptable
 LLM client) and `tests/fixtures/synthetic_comp.py` (generates toy competitions).

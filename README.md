@@ -21,7 +21,7 @@ Full design lives in [`docs/superpowers/specs/2026-05-14-llm-agent-harness-desig
 
 ## Status
 
-End-to-end runnable. A clean clone runs the full test suite — **408 tests, ~5s, no API keys** — which is exactly what CI enforces (Linux 3.11 + 3.12). A *real* solve needs a Gemini API key plus Kaggle credentials; on the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
+End-to-end runnable. A clean clone runs the full test suite — **419 tests, ~5s, no API keys** — which is exactly what CI enforces (Linux 3.11 + 3.12). A *real* solve needs a Gemini API key plus Kaggle credentials; on the latest validation, real `gemini-2.5-flash` solved a synthetic binary-classification micro-comp in **6 iterations, 10 seconds, $0.0013**, writing both `agent/fe.py` and `agent/model.py`, running leak-free CV, producing a submission CSV, routing the (mocked) Kaggle push through the checkpoint gate — and emitting an OpenTelemetry trace, an MLflow run per `train_cv`, a CV↔LB calibration row, and a cost-ledger row along the way.
 
 > **Headline v1 goal:** a credential-free demo so a clean clone runs the agent loop end-to-end with **no keys** (fake-LLM + synthetic-comp path). This is **not wired yet** — until it is, a real solve requires Gemini. See [`GOALS.md`](GOALS.md) for the full v1 scope boundary.
 
@@ -42,7 +42,7 @@ What's shipped:
 - ✅ **Agent behavior metrics** — `turns_per_run`, `turns_to_first_submission`, `turns_to_best_score`, `tool_call_failure_rate`, stuck-loop detector (consolidated from `resume.py`)
 - ✅ **Streamlit dashboard** — `kaggle-slayer-dashboard` console_script: portfolio page (list comps + best CV + cost + tool count) + comp-detail page (journal timeline + cost + calibration + behavior metrics + notes + submission CSV downloads). Read-only over disk
 - ✅ **Chaos tier** — `FailureInjectingLLMClient` fixture (seeded, configurable rate) + integration test asserting `result.status == "done"` deterministically under 5% transient injection
-- ✅ **408 unit + integration + chaos tests** (pass with no keys). ruff clean; mypy strict on `harness/` locally and `agent/` too. **CI type-checks the harness only** (`mypy kaggle_slayer/harness`) — see [`CLAUDE.md`](CLAUDE.md). ~95% coverage on new code.
+- ✅ **419 unit + integration + chaos tests** (pass with no keys). ruff clean; mypy strict on `harness/` locally and `agent/` too. **CI type-checks the harness only** (`mypy kaggle_slayer/harness`) — see [`CLAUDE.md`](CLAUDE.md). ~95% coverage on new code.
 - ✅ **Docs suite for Claude Code-driven development** — [`docs/architecture.md`](docs/architecture.md), six [ADRs](docs/adr/README.md), and `.claude/` commands (`/gates`, `/solve`, `/harness-review`, `/new-adr`) + a `harness-reviewer` agent.
 
 What's next (deferred to the post-v1 roadmap — see [`GOALS.md`](GOALS.md)):
@@ -69,7 +69,7 @@ No API keys are needed to clone, install, and run the full test suite:
 git clone https://github.com/rodme02/KaggleSlayer.git
 cd KaggleSlayer
 pip install -e ".[dev,dashboard]"
-pytest -m "not slow"                                # ~5s, 408 tests, no keys
+pytest -m "not slow"                                # ~5s, 419 tests, no keys
 ```
 
 To run against a real competition you need a Gemini API key (Tier 1 billing recommended — Tier 0 free tier has 0 daily quota for `gemini-2.5-pro` and only 20/day for `gemini-2.5-flash`) and Kaggle API credentials. Copy [`.env.example`](.env.example) to `.env` and fill it in:
@@ -162,7 +162,7 @@ scripts/preflight.py            # verify Gemini + Kaggle creds
 
 ## Status of testing
 
-- **Non-slow tier** — `pytest -m "not slow"`. 408 tests (1 environment-gated skip), covering unit + integration + chaos. This single invocation is what CI runs on every push (Linux 3.11 + 3.12 matrix).
+- **Non-slow tier** — `pytest -m "not slow"`. 419 tests (1 environment-gated skip), covering unit + integration + chaos. This single invocation is what CI runs on every push (Linux 3.11 + 3.12 matrix).
 - **Integration tier** — fake-LLM-driven scripted runs against a synthetic micro-comp (`tests/fixtures/synthetic_comp.py`). Marked `integration` per-test; included in CI via the default `-m "not slow"` invocation (there is no separate `-m integration` CI job).
 - **Chaos tier** — `pytest -m chaos`. Scripted Solver run wrapped in `FailureInjectingLLMClient` (5% transient injection, seeded) + `RetryingLLMClient` adapter. Verifies spec §11.3 / §13: the pipeline reaches `done` deterministically and the journal stays parseable. Runs in CI under the default `-m "not slow"` invocation.
 - **Slow tier (opt-in)** — real Gemini calls. `pytest -m slow`. 8 tests; ~$0.005–0.02 per run; skipped automatically when `GEMINI_API_KEY` is missing. Not part of CI.
